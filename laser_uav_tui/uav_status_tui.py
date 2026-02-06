@@ -14,7 +14,7 @@ from std_srvs.srv import Trigger
 UAV_NAME = os.getenv('UAV_NAME', 'uav1')
 
 def quaternion_to_euler(x, y, z, w):
-    """Converte Quaternion para Euler (Radianos)."""
+    #Converts Quaternion to Euler (Radians).
     t0 = +2.0 * (w * x + y * z)
     t1 = +1.0 - 2.0 * (x * x + y * y)
     roll = math.atan2(t0, t1)
@@ -30,7 +30,7 @@ def quaternion_to_euler(x, y, z, w):
     return roll, pitch, yaw
 
 class TopicMonitor:
-    """Monitora a frequência (Hz) de um tópico."""
+    #Monitors the frequency (Hz) of a topic.
     def __init__(self, node, topic_name, msg_type):
         self.count = 0
         self.last_count = 0
@@ -55,16 +55,16 @@ class LaserUavTUI(Node):
         super().__init__('uav_status_tui')
         self.stdscr = stdscr
 
-        # Configura para nao bloquear a execucao esperando tecla
+        # Configures to not block execution waiting for a key
         self.stdscr.nodelay(True)
         
-        # 1. Odometria
+        # 1. Odometry
         self.pos = {'x': 0.0, 'y': 0.0, 'z': 0.0, 'yaw': 0.0, 'roll': 0.0, 'pitch': 0.0}
         self.odom_topic = f'/{UAV_NAME}/estimation_manager/estimation'
         self.create_subscription(Odometry, self.odom_topic, self.odom_callback, 10)
         self.odom_monitor = TopicMonitor(self, self.odom_topic, Odometry)
 
-        # 2. Controle
+        # 2. Control
         self.ctrl_diag = None
         self.ctrl_topic = f'/{UAV_NAME}/control_manager/diagnostics'
         self.create_subscription(UavControlDiagnostics, self.ctrl_topic, self.ctrl_diag_callback, 10)
@@ -74,15 +74,14 @@ class LaserUavTUI(Node):
         self.api_topic = f'/{UAV_NAME}/px4_api/diagnostics'
         self.create_subscription(ApiPx4Diagnostics, self.api_topic, self.api_diag_callback, 10)
 
-        # 4. Sistema
+        # 4. System
         self.sys_info = {'cpu': 0.0, 'ram_percent': 0.0, 'ram_used': 0.0}
 
         # Timers
         self.create_timer(0.066, self.draw_screen)     
         self.create_timer(1.0, self.update_system_stats) 
 
-        # Comando drone (Clients)
-        # Nota: Certifique-se que o tipo de servico (Trigger) e o nome estao corretos no seu sistema
+        # Drone command
         self.arm_client = self.create_client(Trigger, f'/{UAV_NAME}/px4_api/arm')
         self.disarm_client = self.create_client(Trigger, f'/{UAV_NAME}/px4_api/disarm')
         self.takeoff_client= self.create_client(Trigger, f'/{UAV_NAME}/control_manager/takeoff')
@@ -100,62 +99,60 @@ class LaserUavTUI(Node):
     def api_diag_callback(self, msg):
         self.api_diag = msg
 
-    # --- Funções de Serviço ---
+    # Services functions
     def call_service_arm(self):
         if not self.arm_client.service_is_ready():
-            self.get_logger().error("Servico armar indisponivel")
+            self.get_logger().error("Arm service unavailable")
             return
-        self.get_logger().info("Enviando Armar...")
+        self.get_logger().info("Send Arm...")
         req = Trigger.Request()
         self.arm_client.call_async(req)
 
     def call_service_disarm(self):
         if not self.disarm_client.service_is_ready():
-            self.get_logger().error("Servico disarmar indisponivel")
+            self.get_logger().error("Disarm service unavailable")
             return
-        self.get_logger().info("Enviando disarmar...")
+        self.get_logger().info("Send Disarm..")
         req = Trigger.Request()
         self.disarm_client.call_async(req) 
 
     def call_service_takeoff(self):
         if not self.takeoff_client.service_is_ready():
-            self.get_logger().error("Servico TAKEOFF indisponivel")
+            self.get_logger().error("Takeoff service unavailable")
             return
-        self.get_logger().info("Enviando Decolar...")
+        self.get_logger().info("Send Takeoff...")
         req = Trigger.Request()
         self.takeoff_client.call_async(req)
 
     def call_service_land(self):
         if not self.land_client.service_is_ready():
-            self.get_logger().error("Servico LAND indisponivel")
+            self.get_logger().error("LAND service unavailable")
             return
-        self.get_logger().info("Enviando Pousar...")
+        self.get_logger().info("Send Land...")
         req = Trigger.Request()
         self.land_client.call_async(req)
     
-    # --- Lógica do Menu ---
+    # Menu logic
     def open_menu(self):
-        """Abre o menu bloqueante (pausa a atualizacao da tela de fundo)."""
-        self.stdscr.nodelay(False) # Torna o getch bloqueante para navegar no menu
+        self.stdscr.nodelay(False)
         
-        options = ["Armar", "Decolar", "Pousar", "Disarmar", "Voltar"]
+        options = ["Arm", "Takeoff", "Land", "Disarm", "Back"]
         idx = 0
         
         while True:
-            # 1. Desenha a caixa do menu
+            # 1. Draw menu box
             h, w = self.stdscr.getmaxyx()
             box_h, box_w = 12, 40
             start_y, start_x = (h // 2) - (box_h // 2), (w // 2) - (box_w // 2)
             
-            # Limpa área central ou desenha caixa
-            self.draw_box(start_y, start_x, box_h, box_w, "MENU COMANDO", [], curses.color_pair(3), curses.color_pair(2))
+            # Clears central area or draws bo
+            self.draw_box(start_y, start_x, box_h, box_w, "COMMAND MENU", [], curses.color_pair(3), curses.color_pair(2))
 
-            # 2. Desenha as opções
+            # 2. Draw options
             for i, option in enumerate(options):
                 x_pos = start_x + 2
                 y_pos = start_y + 3 + i
                 if i == idx:
-                    # Item selecionado (Reverso)
                     self.stdscr.attron(curses.A_REVERSE)
                     self.stdscr.addstr(y_pos, x_pos, f"> {option}")
                     self.stdscr.attroff(curses.A_REVERSE)
@@ -164,14 +161,14 @@ class LaserUavTUI(Node):
 
             self.stdscr.refresh()
 
-            # 3. Captura tecla
+            # 3. Capture key
             key = self.stdscr.getch()
 
             if key == curses.KEY_UP:
                 idx = max(0, idx - 1)
             elif key == curses.KEY_DOWN:
                 idx = min(len(options) - 1, idx + 1)
-            elif key == 10: # Enter
+            elif key == 10:
                 if idx == 0:
                     self.call_service_arm()
                 elif idx == 1:
@@ -184,7 +181,7 @@ class LaserUavTUI(Node):
             elif key == 27 or key == ord('q'): 
                 break
         
-        self.stdscr.nodelay(True) # Retorna para modo nao-bloqueante (loop principal)
+        self.stdscr.nodelay(True)
 
 
     def update_system_stats(self):
@@ -213,18 +210,17 @@ class LaserUavTUI(Node):
         except curses.error: pass
 
     def draw_screen(self):
-        # 0. Verifica se usuario apertou tecla
         try:
             key = self.stdscr.getch()
             if key == ord('m') or key == ord('M'):
                 self.open_menu()
-                return # Pula o desenho deste frame
+                return 
         except: pass
 
         self.stdscr.erase()
         max_y, max_x = self.stdscr.getmaxyx()
         
-        # Colunas
+        # Columns
         c1 = 1 
         c2 = 34 
         c3 = 66
@@ -234,7 +230,7 @@ class LaserUavTUI(Node):
         try: self.stdscr.addstr(0, max(0, (max_x//2)-(len(header)//2)), header, curses.A_REVERSE)
         except: pass
 
-        # Box 1: Odometria
+        # Box 1: Odometry
         odom_txt = [
             f"X: {self.pos['x']:6.2f}",
             f"Y: {self.pos['y']:6.2f}",
@@ -243,7 +239,7 @@ class LaserUavTUI(Node):
         ]
         self.draw_box(2, c1, 10, 31, f"Est [{self.odom_monitor.hz:.1f} Hz]", odom_txt, curses.color_pair(2), curses.color_pair(1))
 
-        # Box 2: Sistema
+        # Box 2: System
         sys_txt = [
             f"CPU: {self.sys_info['cpu']:5.1f}%",
             f"RAM: {self.sys_info['ram_percent']:5.1f}%",
@@ -279,7 +275,7 @@ def main(args=None):
     curses.noecho(); curses.cbreak(); stdscr.keypad(True); curses.curs_set(0)
     curses.start_color(); curses.use_default_colors()
     
-    # Pares de Cores: 1=Verde, 2=Branco, 3=Ciano, 4=Magenta
+    # Color Pairs: 1=Green, 2=White, 3=Cyan, 4=Magenta
     for i, c in enumerate([curses.COLOR_GREEN, curses.COLOR_WHITE, curses.COLOR_CYAN, curses.COLOR_MAGENTA], 1):
         curses.init_pair(i, c, -1)
 
