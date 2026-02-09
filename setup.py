@@ -27,7 +27,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'status_tui = laser_uav_tui.uav_status_tui:main',
+            'tui = laser_uav_tui.tui:main',
         ],
     },
 )
