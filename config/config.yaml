@@ -1,0 +1,6 @@
+topics:
+  - "/uav1/hw_api/motor_speed_estimated"
+  - "/uav1/px4_api/diagnostics"
+  - "/uav1/px4_api/odometry"
+  - "/uav1/px4_api/imu"
+
