@@ -351,13 +351,11 @@ class LaserUavTUI(Node):
         except: pass
         u_list = sorted(self.uavs.keys())
         box_h = 7
-        
         current_y = 2
-        
+
         for i, name in enumerate(u_list):
             if current_y + box_h + 1 > max_y: break
             u = self.uavs[name]
-            
             has_extras = len(u.extra_monitors) > 0
             block_height = 10 + (box_h + 1 if has_extras else 0)
             
@@ -390,7 +388,23 @@ class LaserUavTUI(Node):
             box_w = (max_x - 4) // 3
             
             self.draw_box(current_y+1, 2, box_h, box_w, f"Estimation [{u.odom_monitor.hz:.1f}Hz]", [f"X: {u.pos['x']:3.2f}", f"Y: {u.pos['y']:3.2f}", f"Z: {u.pos['z']:3.2f}", f"Heading: {u.pos['yaw']:3.2f}"], border_col, curses.color_pair(1))
-            self.draw_box(current_y+1, 2 + box_w, box_h, box_w, "System", [f"CPU: {self.sys_info['cpu']:3.1f}%", f"RAM: {self.sys_info['ram_percent']:3.1f}%", f"Used: {self.sys_info['ram_used']:3.2f} GB"], border_col, curses.color_pair(4))
+            
+            hw_api_content = []
+            if u.api_diag:
+                qty_sat = getattr(u.api_diag, 'qty_satellites', 'N/A')
+                rf_jam = getattr(u.api_diag, 'rf_jamming', 'N/A')
+                hw_api_content = [
+                    f"Satellites: {qty_sat}",
+                    f"RF Jamming: {rf_jam}"
+                ]
+            else:
+                hw_api_content = [
+                    "Satellites: N/A",
+                    "RF Jamming: N/A"
+                ]
+
+            self.draw_box(current_y+1, 2 + box_w, box_h, box_w, "HW_API", hw_api_content, border_col, curses.color_pair(4))
+            
             dtxt = []
             if u.api_diag: dtxt += [f"Armed: {'YES' if u.api_diag.armed else 'NO'}", f"Offb: {'YES' if u.api_diag.offboard_mode else 'NO'}"]
             if u.ctrl_diag: dtxt += [f"Fly: {'YES' if u.ctrl_diag.is_fly else 'NO'}" , f"Goal: {'YES' if u.ctrl_diag.have_goal else 'NO'}", f"Speed: {u.ctrl_diag.current_norm_speed:3.2f} m/s"]
