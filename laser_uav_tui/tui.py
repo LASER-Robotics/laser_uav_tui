@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 import os
+import sys
 import time
 import math
 import psutil
 import curses
 import re
+import yaml
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from laser_msgs.msg import UavControlDiagnostics, ApiPx4Diagnostics, PoseWithHeading
 from std_srvs.srv import Trigger
+from rosidl_runtime_py.utilities import get_message
 
 def quaternion_to_euler(x, y, z, w):
     t0 = +2.0 * (w * x + y * z)
@@ -45,7 +48,8 @@ class TopicMonitor:
         return self.hz
 
 class UavData:
-    def __init__(self, node, name):
+    def __init__(self, node, name, config_topics):
+        self.node = node
         self.name = name
         self.pos = {'x': 0.0, 'y': 0.0, 'z': 0.0, 'yaw': 0.0, 'roll': 0.0, 'pitch': 0.0}
         self.ctrl_diag = None
@@ -61,6 +65,22 @@ class UavData:
         self.takeoff_cl = node.create_client(Trigger, f'/{name}/control_manager/takeoff')
         self.land_cl = node.create_client(Trigger, f'/{name}/control_manager/land')
         self.goto_pub = node.create_publisher(PoseWithHeading, f'/{name}/control_manager/goto', 10)
+        self.target_topics = config_topics
+        self.extra_monitors = {} 
+
+    def check_and_subscribe_extras(self, available_topics_map):
+        for topic in self.target_topics:
+            if topic in self.extra_monitors:
+                continue
+            if self.name not in topic:
+                continue
+            if topic in available_topics_map:
+                try:
+                    type_str = available_topics_map[topic][0]
+                    msg_class = get_message(type_str)
+                    self.extra_monitors[topic] = TopicMonitor(self.node, topic, msg_class)
+                except Exception:
+                    pass
 
     def odom_cb(self, msg):
         p = msg.pose.pose.position
@@ -93,38 +113,57 @@ class LaserUavTUI(Node):
         self.goto_vals = [0.0, 0.0, 1.5, 0.0]
         self.sys_info = {'cpu': 0.0, 'ram_percent': 0.0, 'ram_used': 0.0}
         self.blink_state = True
+        
+        self.config_topics = []
+        self.load_config_from_args()
+
         self.create_timer(2.0, self.discover_uavs)
         self.create_timer(0.05, self.update_loop)
         self.create_timer(1.0, self.update_system_stats)
         self.create_timer(0.5, self.toggle_blink)
+
+    def load_config_from_args(self):
+        if '--config' in sys.argv:
+            try:
+                idx = sys.argv.index('--config')
+                if idx + 1 < len(sys.argv):
+                    config_path = sys.argv[idx + 1]
+                    if os.path.exists(config_path):
+                        with open(config_path, 'r') as f:
+                            data = yaml.safe_load(f)
+                            if data and 'topics' in data:
+                                self.config_topics = data['topics']
+            except Exception:
+                pass
 
     def toggle_blink(self):
         self.blink_state = not self.blink_state
 
     def discover_uavs(self):
         names_types = self.get_topic_names_and_types()
+        topics_map = {name: types for name, types in names_types}
         for name, _ in names_types:
-            if len(self.uavs) == 3:
-                break
             match = re.match(r'/(uav\d+)/estimation_manager/estimation', name)
             if match:
                 uav_name = match.group(1)
                 if uav_name not in self.uavs:
-                    self.uavs[uav_name] = UavData(self, uav_name)
+                    if len(self.uavs) < 3:
+                        self.uavs[uav_name] = UavData(self, uav_name, self.config_topics)
+        
+        for uav in self.uavs.values():
+            uav.check_and_subscribe_extras(topics_map)
 
     def update_system_stats(self):
         self.sys_info['cpu'] = psutil.cpu_percent()
         mem = psutil.virtual_memory()
         self.sys_info['ram_percent'] = mem.percent
         self.sys_info['ram_used'] = (mem.total - mem.available) / (1024 ** 3)
-        
         active_nodes = self.get_node_names_and_namespaces()
-        
         for name, uav in self.uavs.items():
             uav.odom_monitor.update_hz()
-            
+            for mon in uav.extra_monitors.values():
+                mon.update_hz()
             target_ns = f"/{name.lower().strip('/')}"
-            
             found = False
             for node_name, node_ns in active_nodes:
                 if node_name == 'autostart' and node_ns == target_ns:
@@ -165,7 +204,6 @@ class LaserUavTUI(Node):
         sy = 2 + (self.selected_idx * 10)
         gx, gy = sx + 25, sy + 2
         fy, fx = gy + 1 + self.goto_idx, gx + 2
-        
         curses.echo()
         curses.curs_set(1)
         self.stdscr.attron(curses.color_pair(3) | curses.A_BOLD)
@@ -179,20 +217,16 @@ class LaserUavTUI(Node):
             ch = self.stdscr.getch()
             if ch == 10: break
             elif ch == 27: 
-                curses.noecho()
-                curses.curs_set(0)
-                return
+                curses.noecho(); curses.curs_set(0); return
             elif ch in (curses.KEY_BACKSPACE, 127, 8):
                 if len(new_val_str) > 0: new_val_str = new_val_str[:-1]
             elif 32 <= ch <= 126:
                 if len(new_val_str) < 10: new_val_str += chr(ch)
-
         try:
             if new_val_str: self.goto_vals[self.goto_idx] = float(new_val_str)
         except: pass
         self.stdscr.attroff(curses.color_pair(3) | curses.A_BOLD)
-        curses.noecho()
-        curses.curs_set(0)
+        curses.noecho(); curses.curs_set(0)
 
     def publish_goto(self, name):
         u = self.uavs[name]
@@ -261,7 +295,13 @@ class LaserUavTUI(Node):
         box_w_screen = (w - 4) // 3
         sys_center_x = 2 + box_w_screen + (box_w_screen // 2)
         menu_w = 18
-        sy, sx = 2 + (self.selected_idx * 10), max(2, sys_center_x - (menu_w // 2))
+        current_y_offset = 2
+        for i in range(self.selected_idx):
+             u_loop = self.uavs[u_list[i]]
+             has_extra = len(u_loop.extra_monitors) > 0
+             current_y_offset += 10 + (8 if has_extra else 0)
+
+        sy, sx = current_y_offset, max(2, sys_center_x - (menu_w // 2))
         u_name = u_list[self.selected_idx].upper()
         self.draw_box(sy, sx, 9, menu_w, f"{u_name} MENU", [], curses.color_pair(3), curses.color_pair(2))
         for i, opt in enumerate(self.menu_options):
@@ -288,50 +328,82 @@ class LaserUavTUI(Node):
         except: pass
         u_list = sorted(self.uavs.keys())
         box_h = 7
+        current_y = 2
         for i, name in enumerate(u_list):
-            y_off = 2 + (i * 10)
-            if y_off + box_h + 1 > max_y: break
+            if current_y + box_h + 1 > max_y: break
             u = self.uavs[name]
+            has_extras = len(u.extra_monitors) > 0
+            block_height = 10 + ((len(u.extra_monitors.items()) + 2) if has_extras else 0)
+            if current_y + block_height > max_y: break
+
             checks_passed = getattr(u.api_diag, 'preflight_checks_passed', True)
             frame_attr = curses.color_pair(1) | curses.A_BOLD if checks_passed else (curses.color_pair(5) | curses.A_BOLD if self.blink_state else curses.A_NORMAL)
-            
             self.stdscr.attron(frame_attr)
             try:
-                self.stdscr.addstr(y_off, 0, '┌' + '─'*(max_x-2) + '┐')
-                self.stdscr.addstr(y_off+box_h+1, 0, '└' + '─'*(max_x-2) + '┘')
-                for row in range(1, box_h + 1):
-                    self.stdscr.addstr(y_off+row, 0, '│')
-                    self.stdscr.addstr(y_off+row, max_x-1, '│')
-                
-                self.stdscr.addstr(y_off, (max_x - len(name) - 2) // 2, f" {name.upper()} ")
-                
+                self.stdscr.addstr(current_y, 0, '┌' + '─'*(max_x-2) + '┐')
+                total_block_h = block_height - 2
+                for row in range(1, total_block_h):
+                    self.stdscr.addstr(current_y+row, 0, '│'); self.stdscr.addstr(current_y+row, max_x-1, '│')
+                self.stdscr.addstr(current_y + total_block_h, 0, '└' + '─'*(max_x-2) + '┘')
+                self.stdscr.addstr(current_y, (max_x - len(name) - 2) // 2, f" {name.upper()} ")
                 if not u.had_goal:
                     as_status = 'True' if u.autostart_active else 'False'
                     as_txt = f" AutoStart: {as_status} "
-                    self.stdscr.addstr(y_off, max_x - len(as_txt) - 4, as_txt)
+                    self.stdscr.addstr(current_y, max_x - len(as_txt) - 4, as_txt)
             except: pass
             self.stdscr.attroff(frame_attr)
+            
             border_col = curses.color_pair(3) if i == self.selected_idx else curses.color_pair(2)
             box_w = (max_x - 4) // 3
-            self.draw_box(y_off+1, 2, box_h, box_w, f"Estimation [{u.odom_monitor.hz:.1f}Hz]", [f"X: {u.pos['x']:3.2f}", f"Y: {u.pos['y']:3.2f}", f"Z: {u.pos['z']:3.2f}", f"Heading: {u.pos['yaw']:3.2f}"], border_col, curses.color_pair(1))
-            self.draw_box(y_off+1, 2 + box_w, box_h, box_w, "System", [f"CPU: {self.sys_info['cpu']:3.1f}%", f"RAM: {self.sys_info['ram_percent']:3.1f}%", f"Used: {self.sys_info['ram_used']:3.2f} GB"], border_col, curses.color_pair(4))
+            self.draw_box(current_y+1, 2, box_h, box_w, f"Estimation [{u.odom_monitor.hz:.1f}Hz]", [f"X: {u.pos['x']:3.2f}", f"Y: {u.pos['y']:3.2f}", f"Z: {u.pos['z']:3.2f}", f"Heading: {u.pos['yaw']:3.2f}"], border_col, curses.color_pair(1))
+            
+            hw_api_content = []
+            if u.api_diag:
+                qty_sat = getattr(u.api_diag, 'qty_satellites', 'N/A')
+                rf_jam = getattr(u.api_diag, 'rf_jamming', 'N/A')
+                hw_api_content = [f"Satellites: {qty_sat}", f"RF Jamming: {rf_jam}"]
+            else:
+                hw_api_content = ["Satellites: N/A", "RF Jamming: N/A"]
+            self.draw_box(current_y+1, 2 + box_w, box_h, box_w, "HW_API", hw_api_content, border_col, curses.color_pair(4))
+            
             dtxt = []
             if u.api_diag: dtxt += [f"Armed: {'YES' if u.api_diag.armed else 'NO'}", f"Offb: {'YES' if u.api_diag.offboard_mode else 'NO'}"]
             if u.ctrl_diag: dtxt += [f"Fly: {'YES' if u.ctrl_diag.is_fly else 'NO'}" , f"Goal: {'YES' if u.ctrl_diag.have_goal else 'NO'}", f"Speed: {u.ctrl_diag.current_norm_speed:3.2f} m/s"]
-            self.draw_box(y_off+1, 2 + (2 * box_w), box_h, max_x - (2 * box_w) - 4, "Control", dtxt, border_col, curses.color_pair(3))
+            self.draw_box(current_y+1, 2 + (2 * box_w), box_h, max_x - (2 * box_w) - 4, "Control", dtxt, border_col, curses.color_pair(3))
+            
+            if has_extras:
+                mon_content = []
+                for t_name, t_mon in u.extra_monitors.items():
+                    display_name = t_name.replace(f"/{name}/", "").strip('/')
+                    mon_content.append(f"{display_name:<35} {t_mon.hz:6.1f} Hz")
+                self.draw_box(current_y + box_h + 1, 2, len(u.extra_monitors.items()) + 2, max_x - 4, "Topic Monitor", mon_content, border_col, curses.color_pair(2))
+            current_y += (block_height - 2) + 2
+
         try: self.stdscr.addstr(max_y-1, 1, " [UP/DOWN] Select UAV | [M] Menu | Ctrl+C Exit ", curses.color_pair(2) | curses.A_BOLD)
         except: pass
 
 def main():
-    rclpy.init()
+    rclpy.init(args=sys.argv)
+    
     def run(stdscr):
         curses.curs_set(0); curses.start_color(); curses.use_default_colors()
-        for i, c in enumerate([curses.COLOR_GREEN, curses.COLOR_WHITE, curses.COLOR_CYAN, curses.COLOR_MAGENTA, curses.COLOR_YELLOW], 1): curses.init_pair(i, c, -1)
+        for i, c in enumerate([curses.COLOR_GREEN, curses.COLOR_WHITE, curses.COLOR_CYAN, curses.COLOR_MAGENTA, curses.COLOR_YELLOW], 1): 
+            curses.init_pair(i, c, -1)
         node = LaserUavTUI(stdscr)
-        rclpy.spin(node)
-        node.destroy_node()
-    try: curses.wrapper(run)
-    except: pass
-    finally: rclpy.shutdown()
+        try:
+            rclpy.spin(node)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            node.destroy_node()
 
-if __name__ == '__main__': main()
+    try: 
+        curses.wrapper(run)
+    except: 
+        pass
+    finally: 
+        if rclpy.ok():
+            rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
