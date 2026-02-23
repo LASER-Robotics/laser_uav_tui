@@ -1,7 +1,3 @@
-Here is the updated `README.md` with the correct image paths pointing to your new `images` folder, and with the file structure image removed as requested.
-
----
-
 # Laser UAV TUI
 
 *The main TUI dashboard displaying real-time telemetry, hardware diagnostics, and topic monitoring for a single UAV in a ROS 2 environment.*
