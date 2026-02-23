@@ -113,6 +113,7 @@ class LaserUavTUI(Node):
         self.goto_vals = [0.0, 0.0, 1.5, 0.0]
         self.sys_info = {'cpu': 0.0, 'ram_percent': 0.0, 'ram_used': 0.0}
         self.blink_state = True
+        self.micro_agent_active = False 
         
         self.config_topics = []
         self.load_config_from_args()
@@ -158,6 +159,20 @@ class LaserUavTUI(Node):
         mem = psutil.virtual_memory()
         self.sys_info['ram_percent'] = mem.percent
         self.sys_info['ram_used'] = (mem.total - mem.available) / (1024 ** 3)
+
+        agent_running = False
+        for p in psutil.process_iter(['name', 'cmdline']):
+            try:
+                name = p.info.get('name', '')
+                cmd = p.info.get('cmdline', [])
+                if (name and 'MicroXRCEAgent' in name) or (cmd and any('MicroXRCEAgent' in c for c in cmd)):
+                    agent_running = True
+                    break
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        self.micro_agent_active = agent_running
+
+
         active_nodes = self.get_node_names_and_namespaces()
         for name, uav in self.uavs.items():
             uav.odom_monitor.update_hz()
@@ -341,6 +356,11 @@ class LaserUavTUI(Node):
             self.stdscr.attron(frame_attr)
             try:
                 self.stdscr.addstr(current_y, 0, '┌' + '─'*(max_x-2) + '┐')
+                agent_active = getattr(self, 'micro_agent_active', False)
+                if agent_active:
+                    self.stdscr.addstr(current_y, 2, " uXRCE: True ")
+                else:
+                    self.stdscr.addstr(current_y, 2, " uXRCE: False ", curses.color_pair(5) | curses.A_BOLD)
                 total_block_h = block_height - 2
                 for row in range(1, total_block_h):
                     self.stdscr.addstr(current_y+row, 0, '│'); self.stdscr.addstr(current_y+row, max_x-1, '│')
