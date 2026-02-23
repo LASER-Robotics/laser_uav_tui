@@ -172,7 +172,6 @@ class LaserUavTUI(Node):
                 pass
         self.micro_agent_active = agent_running
 
-
         active_nodes = self.get_node_names_and_namespaces()
         for name, uav in self.uavs.items():
             uav.odom_monitor.update_hz()
