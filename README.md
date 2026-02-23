@@ -8,6 +8,9 @@ Here is the updated `README.md` with the correct image paths pointing to your ne
 
 **Laser UAV TUI** is a lightweight, `curses`-based Terminal User Interface (TUI) for monitoring and controlling multiple unmanned aerial vehicles (UAVs) in a ROS 2 environment. It provides real-time system and telemetry monitoring, diagnostic checks, and a command interface directly from your terminal.
 
+![Image of the laser_uav_tui in operation.](https://github.com/LASER-Robotics/laser_uav_tui/blob/dev/increase_view/images/main_interface.png)
+
+
 ## 🌟 Features
 
 * **Auto-Discovery:** Automatically detects and monitors up to 3 UAVs running on the network by scanning for specific `estimation` topics.
@@ -40,27 +43,6 @@ pip3 install psutil pyyaml windows-curses # (windows-curses only if running on W
 
 ---
 
-## ⚙️ Installation
-
-1. Clone or place the `laser_uav_tui` package into your ROS 2 workspace's `src` directory.
-2. Build the package using `colcon`:
-```bash
-cd ~/your_colcon_ws
-colcon build --packages-select laser_uav_tui
-
-```
-
-
-3. Source your workspace:
-```bash
-source install/setup.bash
-
-```
-
-
-
----
-
 ## 🚀 Usage
 
 Run the TUI node using the standard ROS 2 run command. To enable dynamic topic monitoring, pass the path to your `config.yaml` file as an argument.
@@ -70,9 +52,9 @@ ros2 run laser_uav_tui tui.py --config $(ros2 pkg prefix laser_uav_tui)/share/la
 
 ```
 
-*(Note: Depending on how your `setup.py` installs the executable, the executable name might just be `tui` instead of `tui.py`. Adjust accordingly).*
-
 ### 🎮 Keyboard Controls
+
+![laser_uav_tui system menu image ](https://github.com/LASER-Robotics/laser_uav_tui/blob/dev/increase_view/images/menu_interface.png)
 
 * **`UP` / `DOWN` Arrows**: Select a different UAV from the list.
 * **`M` or `m**`: Open the Action Menu for the selected UAV.
@@ -84,10 +66,7 @@ ros2 run laser_uav_tui tui.py --config $(ros2 pkg prefix laser_uav_tui)/share/la
 
 Pressing **`M`** opens the action menu for the selected UAV. From here, you can trigger specific service calls (Arm, Takeoff, Land, Disarm) or navigate to the "GoTo" submenu to send specific coordinates.
 
-| Main Action Menu | GoTo Coordinate Input |
-| --- | --- |
-|  |  |
-| *Navigate options and press Enter to select.* | *Edit X, Y, Z, Heading fields, then select SEND.* |
+![laser_uav_tui system goto menu image ](https://github.com/LASER-Robotics/laser_uav_tui/blob/dev/increase_view/images/goto_interface.png)
 
 ---
 
