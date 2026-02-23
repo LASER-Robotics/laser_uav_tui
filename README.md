@@ -7,7 +7,7 @@
 ![Image of the laser_uav_tui in operation.](https://github.com/LASER-Robotics/laser_uav_tui/blob/dev/increase_view/images/main_interface.png)
 
 
-## 🌟 Features
+## Features
 
 * **Auto-Discovery:** Automatically detects and monitors up to 3 UAVs running on the network by scanning for specific `estimation` topics.
 * **Real-Time Telemetry:** Displays current Pose (X, Y, Z, Heading), publishing rates (Hz), and speeds.
@@ -16,30 +16,8 @@
 * **Dynamic Topic Monitoring:** Monitor the frequency (Hz) of arbitrary ROS 2 topics by specifying them in a YAML configuration file.
 * **System Stats:** Tracks host CPU and RAM usage in real-time.
 
----
 
-## 📋 Prerequisites and Dependencies
-
-This package is built for ROS 2 and requires Python 3. Ensure you have the following dependencies installed:
-
-**System Dependencies:**
-
-```bash
-pip3 install psutil pyyaml windows-curses # (windows-curses only if running on Windows, native on Linux)
-
-```
-
-**ROS 2 Dependencies:**
-
-* `rclpy`
-* `std_srvs`
-* `nav_msgs`
-* `laser_msgs` (Custom package providing `UavControlDiagnostics`, `ApiPx4Diagnostics`, and `PoseWithHeading`)
-* `rosidl_runtime_py`
-
----
-
-## 🚀 Usage
+## Usage
 
 Run the TUI node using the standard ROS 2 run command. To enable dynamic topic monitoring, pass the path to your `config.yaml` file as an argument.
 
@@ -48,7 +26,7 @@ ros2 run laser_uav_tui tui.py --config $(ros2 pkg prefix laser_uav_tui)/share/la
 
 ```
 
-### 🎮 Keyboard Controls
+**Keyboard Controls:**
 
 ![laser_uav_tui system menu image ](https://github.com/LASER-Robotics/laser_uav_tui/blob/dev/increase_view/images/menu_interface.png)
 
@@ -58,15 +36,13 @@ ros2 run laser_uav_tui tui.py --config $(ros2 pkg prefix laser_uav_tui)/share/la
 * **`ESC`**: Exit the current menu or cancel coordinate input.
 * **`Ctrl + C`**: Gracefully exit the application.
 
-### Interactive Control Menus
+**Interactive Control Menus:**
 
 Pressing **`M`** opens the action menu for the selected UAV. From here, you can trigger specific service calls (Arm, Takeoff, Land, Disarm) or navigate to the "GoTo" submenu to send specific coordinates.
 
 ![laser_uav_tui system goto menu image ](https://github.com/LASER-Robotics/laser_uav_tui/blob/dev/increase_view/images/goto_interface.png)
 
----
-
-## 🛠️ Configuration (`config.yaml`)
+## Configuration (`config.yaml`):
 
 You can monitor the publishing rates of extra topics by adding them to the `config.yaml` file. The TUI will automatically resolve the message types and display their Hz in the "Topic Monitor" box shown in the main interface image.
 
@@ -82,25 +58,3 @@ topics:
 
 *Note: The script dynamically maps these topics to the respective UAV based on the namespace (e.g., `uav1`, `uav2`).*
 
----
-
-## 📡 ROS 2 Interfaces
-
-### Subscriptions
-
-* `/{uav_name}/estimation_manager/estimation` (`nav_msgs/Odometry`)
-* `/{uav_name}/control_manager/diagnostics` (`laser_msgs/UavControlDiagnostics`)
-* `/{uav_name}/px4_api/diagnostics` (`laser_msgs/ApiPx4Diagnostics`)
-
-### Publishers
-
-* `/{uav_name}/control_manager/goto` (`laser_msgs/PoseWithHeading`)
-
-### Service Clients
-
-* `/{uav_name}/px4_api/arm` (`std_srvs/Trigger`)
-* `/{uav_name}/px4_api/disarm` (`std_srvs/Trigger`)
-* `/{uav_name}/control_manager/takeoff` (`std_srvs/Trigger`)
-* `/{uav_name}/control_manager/land` (`std_srvs/Trigger`)
-
----
