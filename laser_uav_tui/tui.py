@@ -10,6 +10,7 @@ import yaml
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
+from std_msgs.msg import Float64
 from laser_msgs.msg import UavControlDiagnostics, ApiPx4Diagnostics, PoseWithHeading
 from std_srvs.srv import Trigger
 from rosidl_runtime_py.utilities import get_message
@@ -54,12 +55,14 @@ class UavData:
         self.pos = {'x': 0.0, 'y': 0.0, 'z': 0.0, 'yaw': 0.0, 'roll': 0.0, 'pitch': 0.0}
         self.ctrl_diag = None
         self.api_diag = None
+        self.vins_feat = None
         self.had_goal = False
         self.autostart_active = False
         self.odom_monitor = TopicMonitor(node, f'/{name}/estimation_manager/estimation', Odometry)
         node.create_subscription(Odometry, f'/{name}/estimation_manager/estimation', self.odom_cb, 10)
         node.create_subscription(UavControlDiagnostics, f'/{name}/control_manager/diagnostics', self.ctrl_cb, 10)
         node.create_subscription(ApiPx4Diagnostics, f'/{name}/px4_api/diagnostics', self.api_cb, 10)
+        node.create_subscription(Float64, f'/{name}/ov_msckf/num_points_slam', self.vins_feat_cb, 10)
         self.arm_cl = node.create_client(Trigger, f'/{name}/px4_api/arm')
         self.disarm_cl = node.create_client(Trigger, f'/{name}/px4_api/disarm')
         self.takeoff_cl = node.create_client(Trigger, f'/{name}/control_manager/takeoff')
@@ -95,6 +98,9 @@ class UavData:
 
     def api_cb(self, msg): 
         self.api_diag = msg
+
+    def vins_feat_cb(self, msg): 
+        self.vins_feat = msg
 
 class LaserUavTUI(Node):
     def __init__(self, stdscr):
@@ -341,13 +347,13 @@ class LaserUavTUI(Node):
         try: self.stdscr.addstr(0, max(0, (max_x-len(header))//2), header, curses.color_pair(2) | curses.A_BOLD)
         except: pass
         u_list = sorted(self.uavs.keys())
-        box_h = 7
+        box_h = 6
         current_y = 2
         for i, name in enumerate(u_list):
             if current_y + box_h + 1 > max_y: break
             u = self.uavs[name]
             has_extras = len(u.extra_monitors) > 0
-            block_height = 10 + ((len(u.extra_monitors.items()) + 2) if has_extras else 0)
+            block_height = 9 + ((len(u.extra_monitors.items()) + 2) if has_extras else 0)
             if current_y + block_height > max_y: break
 
             checks_passed = getattr(u.api_diag, 'preflight_checks_passed', True)
@@ -374,21 +380,24 @@ class LaserUavTUI(Node):
             
             border_col = curses.color_pair(3) if i == self.selected_idx else curses.color_pair(2)
             box_w = (max_x - 4) // 3
-            self.draw_box(current_y+1, 2, box_h, box_w, f"Estimation [{u.odom_monitor.hz:.1f}Hz]", [f"X: {u.pos['x']:3.2f}", f"Y: {u.pos['y']:3.2f}", f"Z: {u.pos['z']:3.2f}", f"Heading: {u.pos['yaw']:3.2f}"], border_col, curses.color_pair(1))
+            self.draw_box(current_y+1, 2, box_h, box_w - 3, f"Odom [{u.odom_monitor.hz:.1f}Hz]", [f"X: {u.pos['x']:3.2f}", f"Y: {u.pos['y']:3.2f}", f"Z: {u.pos['z']:3.2f}", f"Hdg: {u.pos['yaw']:3.2f}"], border_col, curses.color_pair(1))
             
-            hw_api_content = []
+            midtxt = []
             if u.api_diag:
                 qty_sat = getattr(u.api_diag, 'qty_satellites', 'N/A')
                 rf_jam = getattr(u.api_diag, 'rf_jamming', 'N/A')
-                hw_api_content = [f"Satellites: {qty_sat}", f"RF Jamming: {rf_jam}"]
+                midtxt = [f"Satellites: {qty_sat}", f"RF Jamming: {rf_jam}"]
             else:
-                hw_api_content = ["Satellites: N/A", "RF Jamming: N/A"]
-            self.draw_box(current_y+1, 2 + box_w, box_h, box_w, "HW_API", hw_api_content, border_col, curses.color_pair(4))
+                midtxt = ["Satellites: N/A", "RF Jamming: N/A"]
+            if u.vins_feat:
+                midtxt += [f"OV Features: {u.vins_feat.data:.0f}"]
+            self.draw_box(current_y+1, 2 + box_w - 3, box_h, box_w - 2, "", midtxt, border_col, curses.color_pair(4))
             
             dtxt = []
-            if u.api_diag: dtxt += [f"Armed: {'YES' if u.api_diag.armed else 'NO'}", f"Offb: {'YES' if u.api_diag.offboard_mode else 'NO'}"]
-            if u.ctrl_diag: dtxt += [f"Fly: {'YES' if u.ctrl_diag.is_fly else 'NO'}" , f"Goal: {'YES' if u.ctrl_diag.have_goal else 'NO'}", f"Speed: {u.ctrl_diag.current_norm_speed:3.2f} m/s"]
-            self.draw_box(current_y+1, 2 + (2 * box_w), box_h, max_x - (2 * box_w) - 4, "Control", dtxt, border_col, curses.color_pair(3))
+            if u.api_diag: dtxt += [f"Armed: {'YES' if u.api_diag.armed else 'NO'} | Offb: {'YES' if u.api_diag.offboard_mode else 'NO'}"]
+            if u.ctrl_diag: dtxt += [f"Fly: {'YES' if u.ctrl_diag.is_fly else 'NO'} | Goal: {'YES' if u.ctrl_diag.have_goal else 'NO'}", f"Speed: {u.ctrl_diag.current_norm_speed:3.2f} m/s"]
+            if u.ctrl_diag: dtxt += [f"RMSE: { f'{u.ctrl_diag.metrics.rmse:.2f}' if u.ctrl_diag.metrics.rmse >= 0 else ' '} | STD: { f'{u.ctrl_diag.metrics.std:.2f}' if u.ctrl_diag.metrics.std >= 0 else ' '}"]
+            if u.ctrl_diag: self.draw_box(current_y+1, (2 * box_w) - 1 - 2, box_h, max_x - (2 * box_w) - 4 + 3 + 2, f"Control [{u.ctrl_diag.control_iteration_duration_ms:.1f}ms]", dtxt, border_col, curses.color_pair(3))
             
             if has_extras:
                 mon_content = []
