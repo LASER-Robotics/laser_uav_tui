@@ -16,6 +16,8 @@ from laser_msgs.msg import UavControlDiagnostics, ApiPx4Diagnostics, PoseWithHea
 from std_srvs.srv import Trigger
 from rosidl_runtime_py.utilities import get_message
 
+os.environ.setdefault('ESCDELAY', '25')
+
 def quaternion_to_euler(x, y, z, w):
     t0 = +2.0 * (w * x + y * z)
     t1 = +1.0 - 2.0 * (x * x + y * y)
