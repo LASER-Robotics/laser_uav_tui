@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import os
 import sys
 import time
@@ -68,6 +69,7 @@ class UavData:
         self.takeoff_cl = node.create_client(Trigger, f'/{name}/control_manager/takeoff')
         self.land_cl = node.create_client(Trigger, f'/{name}/control_manager/land')
         self.goto_pub = node.create_publisher(PoseWithHeading, f'/{name}/control_manager/goto', 10)
+        self.goto_relative_pub = node.create_publisher(PoseWithHeading, f'/{name}/control_manager/goto_relative', 10)
         self.target_topics = config_topics
         self.extra_monitors = {} 
 
@@ -115,12 +117,11 @@ class LaserUavTUI(Node):
         self.menu_idx = 0
         self.goto_idx = 0
         self.menu_options = ["Arm", "Takeoff", "Land", "Disarm", "GoTo"]
-        self.goto_options = ["X", "Y", "Z", "Heading", "SEND"]
-        self.goto_vals = [0.0, 0.0, 1.5, 0.0]
+        self.goto_options = ["Mode", "X", "Y", "Z", "Heading", "SEND"]
+        self.goto_vals = ["World", 0.0, 0.0, 1.5, 0.0]
         self.sys_info = {'cpu': 0.0, 'ram_percent': 0.0, 'ram_used': 0.0}
         self.blink_state = True
         self.micro_agent_active = False 
-        
         self.config_topics = []
         self.load_config_from_args()
 
@@ -202,8 +203,12 @@ class LaserUavTUI(Node):
             if key == curses.KEY_UP: self.goto_idx = (self.goto_idx - 1) % len(self.goto_options)
             elif key == curses.KEY_DOWN: self.goto_idx = (self.goto_idx + 1) % len(self.goto_options)
             elif key == 10:
-                if self.goto_idx == 4: self.publish_goto(u_list[self.selected_idx])
-                else: self.edit_goto_field()
+                if self.goto_idx == 0:
+                    self.goto_vals[0] = "Relative" if self.goto_vals[0] == "World" else "World"
+                elif self.goto_idx == 5:
+                    self.publish_goto(u_list[self.selected_idx])
+                else:
+                    self.edit_goto_field()
             elif key == 27: self.in_goto_menu = False
         elif self.in_menu:
             if key == curses.KEY_UP: self.menu_idx = (self.menu_idx - 1) % len(self.menu_options)
@@ -251,9 +256,16 @@ class LaserUavTUI(Node):
     def publish_goto(self, name):
         u = self.uavs[name]
         msg = PoseWithHeading()
-        msg.position.x, msg.position.y, msg.position.z = self.goto_vals[0], self.goto_vals[1], self.goto_vals[2]
-        msg.heading = self.goto_vals[3]
-        u.goto_pub.publish(msg)
+        msg.position.x = float(self.goto_vals[1])
+        msg.position.y = float(self.goto_vals[2])
+        msg.position.z = float(self.goto_vals[3])
+        msg.heading = float(self.goto_vals[4])
+        
+        if self.goto_vals[0] == "World":
+            u.goto_pub.publish(msg)
+        else:
+            u.goto_relative_pub.publish(msg)
+            
         self.in_goto_menu = False
         self.in_menu = False
 
@@ -335,10 +347,15 @@ class LaserUavTUI(Node):
 
     def draw_goto_menu(self, y, x):
         box_w = 21
-        self.draw_box(y, x, 7, box_w, "GOTO", [], curses.color_pair(3), curses.color_pair(2))
+        self.draw_box(y, x, 8, box_w, "GOTO", [], curses.color_pair(3), curses.color_pair(2))
         for i, opt in enumerate(self.goto_options):
             attr = (curses.A_REVERSE | curses.A_BOLD) if i == self.goto_idx else (curses.A_NORMAL | curses.A_BOLD)
-            content = f"{opt}: {self.goto_vals[i]:.2f}" if i < 4 else opt
+            if i == 0:
+                content = f"{opt}: {self.goto_vals[i]}"
+            elif i < 5:
+                content = f"{opt}: {self.goto_vals[i]:.2f}"
+            else:
+                content = opt
             self.stdscr.addstr(y+1+i, x+2, content.center(box_w - 4), attr)
 
     def draw_screen(self):
