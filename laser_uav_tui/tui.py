@@ -227,7 +227,7 @@ class LaserUavTUI(Node):
         menu_w = 18
         sx = max(2, sys_center_x - (menu_w // 2))
         sy = 2 + (self.selected_idx * 10)
-        gx, gy = sx + 25, sy + 2
+        gx, gy = sx + 21, sy + 2
         fy, fx = gy + 1 + self.goto_idx, gx + 2
         curses.echo()
         curses.curs_set(1)
