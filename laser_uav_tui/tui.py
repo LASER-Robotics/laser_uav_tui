@@ -11,7 +11,7 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64
-from laser_msgs.msg import UavControlDiagnostics, ApiPx4Diagnostics, PoseWithHeading
+from laser_msgs.msg import UavControlDiagnostics, EstimationManagerDiagnostics, ApiPx4Diagnostics, PoseWithHeading
 from std_srvs.srv import Trigger
 from rosidl_runtime_py.utilities import get_message
 
@@ -54,6 +54,7 @@ class UavData:
         self.name = name
         self.pos = {'x': 0.0, 'y': 0.0, 'z': 0.0, 'yaw': 0.0, 'roll': 0.0, 'pitch': 0.0}
         self.ctrl_diag = None
+        self.est_diag = None
         self.api_diag = None
         self.vins_feat = None
         self.had_goal = False
@@ -61,6 +62,7 @@ class UavData:
         self.odom_monitor = TopicMonitor(node, f'/{name}/estimation_manager/estimation', Odometry)
         node.create_subscription(Odometry, f'/{name}/estimation_manager/estimation', self.odom_cb, 10)
         node.create_subscription(UavControlDiagnostics, f'/{name}/control_manager/diagnostics', self.ctrl_cb, 10)
+        node.create_subscription(EstimationManagerDiagnostics, f'/{name}/estimation_manager/diagnostics', self.est_cb, 10)
         node.create_subscription(ApiPx4Diagnostics, f'/{name}/px4_api/diagnostics', self.api_cb, 10)
         node.create_subscription(Float64, f'/{name}/ov_msckf/num_points_slam', self.vins_feat_cb, 10)
         self.arm_cl = node.create_client(Trigger, f'/{name}/px4_api/arm')
@@ -95,6 +97,9 @@ class UavData:
         self.ctrl_diag = msg
         if msg.have_goal:
             self.had_goal = True
+
+    def est_cb(self, msg): 
+        self.est_diag = msg
 
     def api_cb(self, msg): 
         self.api_diag = msg
@@ -347,7 +352,7 @@ class LaserUavTUI(Node):
         try: self.stdscr.addstr(0, max(0, (max_x-len(header))//2), header, curses.color_pair(2) | curses.A_BOLD)
         except: pass
         u_list = sorted(self.uavs.keys())
-        box_h = 6
+        box_h = 7
         current_y = 2
         for i, name in enumerate(u_list):
             if current_y + box_h + 1 > max_y: break
@@ -366,7 +371,7 @@ class LaserUavTUI(Node):
                     self.stdscr.addstr(current_y, 2, " uXRCE: True ")
                 else:
                     self.stdscr.addstr(current_y, 2, " uXRCE: False ", curses.color_pair(5) | curses.A_BOLD)
-                total_block_h = block_height - 2
+                total_block_h = block_height - 1
                 for row in range(1, total_block_h):
                     self.stdscr.addstr(current_y+row, 0, '│'); self.stdscr.addstr(current_y+row, max_x-1, '│')
                 self.stdscr.addstr(current_y + total_block_h, 0, '└' + '─'*(max_x-2) + '┘')
@@ -380,7 +385,7 @@ class LaserUavTUI(Node):
             
             border_col = curses.color_pair(3) if i == self.selected_idx else curses.color_pair(2)
             box_w = (max_x - 4) // 3
-            self.draw_box(current_y+1, 2, box_h, box_w - 3, f"Odom [{u.odom_monitor.hz:.1f}Hz]", [f"X: {u.pos['x']:3.2f}", f"Y: {u.pos['y']:3.2f}", f"Z: {u.pos['z']:3.2f}", f"Hdg: {u.pos['yaw']:3.2f}"], border_col, curses.color_pair(1))
+            self.draw_box(current_y+1, 2, box_h, box_w - 3, f"Odom [{u.odom_monitor.hz:.1f}Hz]", [f"Source: {u.est_diag.active_odometry_source if u.est_diag else ' '}", f"X: {u.pos['x']:3.2f}", f"Y: {u.pos['y']:3.2f}", f"Z: {u.pos['z']:3.2f}", f"Hdg: {u.pos['yaw']:3.2f}"], border_col, curses.color_pair(1))
             
             midtxt = []
             if u.api_diag:
@@ -395,7 +400,8 @@ class LaserUavTUI(Node):
             
             dtxt = []
             if u.api_diag: dtxt += [f"Armed: {'YES' if u.api_diag.armed else 'NO'} | Offb: {'YES' if u.api_diag.offboard_mode else 'NO'}"]
-            if u.ctrl_diag: dtxt += [f"Fly: {'YES' if u.ctrl_diag.is_fly else 'NO'} | Goal: {'YES' if u.ctrl_diag.have_goal else 'NO'}", f"Speed: {u.ctrl_diag.current_norm_speed:3.2f} m/s"]
+            if u.ctrl_diag: dtxt += [f"Fly: {'YES' if u.ctrl_diag.is_fly else 'NO'} | Goal: {'YES' if u.ctrl_diag.have_goal else 'NO'}", f"Speed: {u.ctrl_diag.current_norm_speed:.2f} m/s"]
+            if u.ctrl_diag: dtxt += [f"Estimated Mass: {u.ctrl_diag.estimated_mass:.2f} Kg"]
             if u.ctrl_diag: dtxt += [f"RMSE: { f'{u.ctrl_diag.metrics.rmse:.2f}' if u.ctrl_diag.metrics.rmse >= 0 else ' '} | STD: { f'{u.ctrl_diag.metrics.std:.2f}' if u.ctrl_diag.metrics.std >= 0 else ' '}"]
             if u.ctrl_diag: self.draw_box(current_y+1, (2 * box_w) - 1 - 2, box_h, max_x - (2 * box_w) - 4 + 3 + 2, f"Control [{u.ctrl_diag.control_iteration_duration_ms:.1f}ms]", dtxt, border_col, curses.color_pair(3))
             
