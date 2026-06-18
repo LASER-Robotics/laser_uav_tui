@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import os
 import sys
 import time
@@ -62,6 +61,11 @@ class UavData:
         self.vins_feat = None
         self.had_goal = False
         self.autostart_active = False
+        
+        self.rampdown_initial = None
+        self.rampdown_current = None
+        self.visual_ratio = 1.0
+
         self.odom_monitor = TopicMonitor(node, f'/{name}/estimation_manager/estimation', Odometry)
         node.create_subscription(Odometry, f'/{name}/estimation_manager/estimation', self.odom_cb, 10)
         node.create_subscription(UavControlDiagnostics, f'/{name}/control_manager/diagnostics', self.ctrl_cb, 10)
@@ -101,6 +105,16 @@ class UavData:
         self.ctrl_diag = msg
         if msg.have_goal:
             self.had_goal = True
+            
+        if hasattr(msg, 'current_control_rampdown'):
+            val = msg.current_control_rampdown
+            if math.isnan(val):
+                self.rampdown_initial = None
+                self.rampdown_current = None
+            else:
+                if self.rampdown_initial is None:
+                    self.rampdown_initial = val if val > 0 else 1.0
+                self.rampdown_current = val
 
     def est_cb(self, msg): 
         self.est_diag = msg
@@ -300,18 +314,29 @@ class LaserUavTUI(Node):
             except: pass
         self.stdscr.attroff(curses.color_pair(2) | curses.A_DIM | curses.A_BOLD)
 
-    def draw_box(self, y, x, h, w, title, content, col_b, col_t):
+    def draw_box(self, y, x, h, w, title, content, col_b, col_t, fill_ratio=None, fill_col=None):
         max_y, max_x = self.stdscr.getmaxyx()
         if y + h > max_y or x + w > max_x: return
         try:
             for i in range(h): self.stdscr.addstr(y + i, x, " " * w)
-            self.stdscr.attron(col_b | curses.A_BOLD)
-            self.stdscr.addstr(y, x, '╔' + '═'*(w-2) + '╗')
-            for i in range(1, h-1):
-                self.stdscr.addstr(y+i, x, '║'); self.stdscr.addstr(y+i, x+w-1, '║')
-            self.stdscr.addstr(y+h-1, x, '╚' + '═'*(w-2) + '╝')
-            if title: self.stdscr.addstr(y, x + (w - len(title) - 2)//2, f" {title} ")
-            self.stdscr.attroff(col_b | curses.A_BOLD)
+            
+            for i in range(h):
+                current_col_b = col_b
+                if fill_ratio is not None and fill_col is not None:
+                    red_rows = int(math.ceil(h * (1.0 - fill_ratio)))
+                    if i >= h - red_rows:
+                        current_col_b = fill_col
+
+                self.stdscr.attron(current_col_b | curses.A_BOLD)
+                if i == 0:
+                    self.stdscr.addstr(y, x, '╔' + '═'*(w-2) + '╗')
+                    if title: self.stdscr.addstr(y, x + (w - len(title) - 2)//2, f" {title} ")
+                elif i == h - 1:
+                    self.stdscr.addstr(y+h-1, x, '╚' + '═'*(w-2) + '╝')
+                else:
+                    self.stdscr.addstr(y+i, x, '║'); self.stdscr.addstr(y+i, x+w-1, '║')
+                self.stdscr.attroff(current_col_b | curses.A_BOLD)
+                
             self.stdscr.attron(col_t | curses.A_BOLD)
             for i, line in enumerate(content):
                 if i < h-2: self.stdscr.addstr(y+1+i, x+2, line[:w-4])
@@ -421,8 +446,32 @@ class LaserUavTUI(Node):
             if u.api_diag: dtxt += [f"Armed: {'YES' if u.api_diag.armed else 'NO'} | Offb: {'YES' if u.api_diag.offboard_mode else 'NO'}"]
             if u.ctrl_diag: dtxt += [f"Fly: {'YES' if u.ctrl_diag.is_fly else 'NO'} | Goal: {'YES' if u.ctrl_diag.have_goal else 'NO'}", f"Speed: {u.ctrl_diag.current_norm_speed:.2f} m/s"]
             if u.ctrl_diag: dtxt += [f"Estimated Mass: {u.ctrl_diag.estimated_mass:.2f} Kg"]
-            if u.ctrl_diag: dtxt += [f"RMSE: { f'{u.ctrl_diag.metrics.rmse:.2f}' if u.ctrl_diag.metrics.rmse >= 0 else ' '} | STD: { f'{u.ctrl_diag.metrics.std:.2f}' if u.ctrl_diag.metrics.std >= 0 else ' '}"]
-            if u.ctrl_diag: self.draw_box(current_y+1, (2 * box_w) - 1 - 2, box_h, max_x - (2 * box_w) - 4 + 3 + 2, f"Control [{u.ctrl_diag.control_iteration_duration_ms:.1f}ms]", dtxt, border_col, curses.color_pair(3))
+            if u.ctrl_diag: dtxt += [f"RMSE: { f'{u.ctrl_diag.metrics.rmse:.2f}' if u.ctrl_diag.metrics.rmse is not None else ' '} | STD: { f'{u.ctrl_diag.metrics.std:.2f}' if u.ctrl_diag.metrics.std is not None else ' '}"]
+            
+            if u.rampdown_current is not None:
+                dtxt += [f"Rampdown: {u.rampdown_current:.2f}"]
+
+            fill_ratio = None
+            fill_col = curses.color_pair(6) | curses.A_BOLD 
+            ctrl_border_col = border_col
+
+            if u.rampdown_current is not None and u.rampdown_initial is not None:
+                ctrl_border_col = curses.color_pair(3)
+                target_ratio = max(0.0, min(1.0, u.rampdown_current / u.rampdown_initial))
+                
+                if u.visual_ratio > target_ratio:
+                    u.visual_ratio = max(target_ratio, u.visual_ratio - 0.03)
+                else:
+                    u.visual_ratio = target_ratio
+                    
+                fill_ratio = u.visual_ratio
+            else:
+                u.visual_ratio = 1.0 
+
+            if u.ctrl_diag: 
+                self.draw_box(current_y+1, (2 * box_w) - 1 - 2, box_h, max_x - (2 * box_w) - 4 + 3 + 2, 
+                              f"Control [{u.ctrl_diag.control_iteration_duration_ms:.1f}ms]", 
+                              dtxt, ctrl_border_col, curses.color_pair(3), fill_ratio=fill_ratio, fill_col=fill_col)
             
             if has_extras:
                 mon_content = []
@@ -440,7 +489,7 @@ def main():
     
     def run(stdscr):
         curses.curs_set(0); curses.start_color(); curses.use_default_colors()
-        for i, c in enumerate([curses.COLOR_GREEN, curses.COLOR_WHITE, curses.COLOR_CYAN, curses.COLOR_MAGENTA, curses.COLOR_YELLOW], 1): 
+        for i, c in enumerate([curses.COLOR_GREEN, curses.COLOR_WHITE, curses.COLOR_CYAN, curses.COLOR_MAGENTA, curses.COLOR_YELLOW, curses.COLOR_RED], 1): 
             curses.init_pair(i, c, -1)
         node = LaserUavTUI(stdscr)
         try:
