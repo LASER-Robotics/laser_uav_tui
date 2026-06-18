@@ -446,7 +446,7 @@ class LaserUavTUI(Node):
             if u.api_diag: dtxt += [f"Armed: {'YES' if u.api_diag.armed else 'NO'} | Offb: {'YES' if u.api_diag.offboard_mode else 'NO'}"]
             if u.ctrl_diag: dtxt += [f"Fly: {'YES' if u.ctrl_diag.is_fly else 'NO'} | Goal: {'YES' if u.ctrl_diag.have_goal else 'NO'}", f"Speed: {u.ctrl_diag.current_norm_speed:.2f} m/s"]
             if u.ctrl_diag: dtxt += [f"Estimated Mass: {u.ctrl_diag.estimated_mass:.2f} Kg"]
-            if u.ctrl_diag: dtxt += [f"RMSE: { f'{u.ctrl_diag.metrics.rmse:.2f}' if u.ctrl_diag.metrics.rmse is not None else ' '} | STD: { f'{u.ctrl_diag.metrics.std:.2f}' if u.ctrl_diag.metrics.std is not None else ' '}"]
+            if u.ctrl_diag: dtxt += [f"RMSE: { f'{u.ctrl_diag.metrics.rmse:.2f}' if u.ctrl_diag.metrics.rmse >= 0 else ' '} | STD: { f'{u.ctrl_diag.metrics.std:.2f}' if u.ctrl_diag.metrics.std >= 0 else ' '}"]
             
             if u.rampdown_current is not None:
                 dtxt += [f"Rampdown: {u.rampdown_current:.2f}"]
