@@ -62,18 +62,21 @@ class UavData:
         self.vins_feat = None
         self.had_goal = False
         self.autostart_active = False
+        
         self.odom_monitor = TopicMonitor(node, f'/{name}/estimation_manager/estimation', Odometry)
         node.create_subscription(Odometry, f'/{name}/estimation_manager/estimation', self.odom_cb, 10)
         node.create_subscription(UavControlDiagnostics, f'/{name}/control_manager/diagnostics', self.ctrl_cb, 10)
         node.create_subscription(EstimationManagerDiagnostics, f'/{name}/estimation_manager/diagnostics', self.est_cb, 10)
         node.create_subscription(ApiPx4Diagnostics, f'/{name}/px4_api/diagnostics', self.api_cb, 10)
         node.create_subscription(Float64, f'/{name}/ov_msckf/num_points_slam', self.vins_feat_cb, 10)
+        
         self.arm_cl = node.create_client(Trigger, f'/{name}/px4_api/arm')
         self.disarm_cl = node.create_client(Trigger, f'/{name}/px4_api/disarm')
         self.takeoff_cl = node.create_client(Trigger, f'/{name}/control_manager/takeoff')
         self.land_cl = node.create_client(Trigger, f'/{name}/control_manager/land')
         self.goto_pub = node.create_publisher(PoseWithHeading, f'/{name}/control_manager/goto', 10)
         self.goto_relative_pub = node.create_publisher(PoseWithHeading, f'/{name}/control_manager/goto_relative', 10)
+        
         self.target_topics = config_topics
         self.extra_monitors = {} 
 
@@ -162,7 +165,7 @@ class LaserUavTUI(Node):
             if match:
                 uav_name = match.group(1)
                 if uav_name not in self.uavs:
-                    if len(self.uavs) < 3:
+                    if len(self.uavs) < 5:
                         self.uavs[uav_name] = UavData(self, uav_name, self.config_topics)
         
         for uav in self.uavs.values():
@@ -289,8 +292,8 @@ class LaserUavTUI(Node):
 
     def draw_watermark(self):
         h, w = self.stdscr.getmaxyx()
-        art = ["  _        _     ____  _____ ____  ",
-               " | |      / \   / ___|| ____|  _ \ ",
+        art = ["  _        _      ____  _____ ____  ",
+               " | |      / \    / ___|| ____|  _ \ ",
                " | |     / _ \  \___ \|  _| | |_) |",
                " | |___ / ___ \  ___) | |___|  _ < ",
                " |_____/_/   \_\|____/|_____|_| \_\\"]
@@ -312,10 +315,11 @@ class LaserUavTUI(Node):
             self.stdscr.addstr(y+h-1, x, '╚' + '═'*(w-2) + '╝')
             if title: self.stdscr.addstr(y, x + (w - len(title) - 2)//2, f" {title} ")
             self.stdscr.attroff(col_b | curses.A_BOLD)
-            self.stdscr.attron(col_t | curses.A_BOLD)
+            
+            self.stdscr.attron(col_t)
             for i, line in enumerate(content):
                 if i < h-2: self.stdscr.addstr(y+1+i, x+2, line[:w-4])
-            self.stdscr.attroff(col_t | curses.A_BOLD)
+            self.stdscr.attroff(col_t)
         except: pass
 
     def update_loop(self):
@@ -336,9 +340,9 @@ class LaserUavTUI(Node):
         menu_w = 18
         current_y_offset = 2
         for i in range(self.selected_idx):
-             u_loop = self.uavs[u_list[i]]
-             has_extra = len(u_loop.extra_monitors) > 0
-             current_y_offset += 10 + (8 if has_extra else 0)
+            u_loop = self.uavs[u_list[i]]
+            has_extra = len(u_loop.extra_monitors) > 0
+            current_y_offset += 10 + 3 + (8 if has_extra else 0)
 
         sy, sx = current_y_offset, max(2, sys_center_x - (menu_w // 2))
         u_name = u_list[self.selected_idx].upper()
@@ -371,13 +375,17 @@ class LaserUavTUI(Node):
         try: self.stdscr.addstr(0, max(0, (max_x-len(header))//2), header, curses.color_pair(2) | curses.A_BOLD)
         except: pass
         u_list = sorted(self.uavs.keys())
+        
         box_h = 7
+        col_box_h = 3
         current_y = 2
+        
         for i, name in enumerate(u_list):
             if current_y + box_h + 1 > max_y: break
             u = self.uavs[name]
             has_extras = len(u.extra_monitors) > 0
-            block_height = 9 + ((len(u.extra_monitors.items()) + 2) if has_extras else 0)
+            
+            block_height = 9 + col_box_h + ((len(u.extra_monitors.items()) + 2) if has_extras else 0)
             if current_y + block_height > max_y: break
 
             checks_passed = getattr(u.api_diag, 'preflight_checks_passed', True)
@@ -404,7 +412,9 @@ class LaserUavTUI(Node):
             
             border_col = curses.color_pair(3) if i == self.selected_idx else curses.color_pair(2)
             box_w = (max_x - 4) // 3
-            self.draw_box(current_y+1, 2, box_h, box_w - 3, f"Odom [{u.odom_monitor.hz:.1f}Hz]", [f"Source: {u.est_diag.active_odometry_source if u.est_diag else ' '}", f"X: {u.pos['x']:3.2f}", f"Y: {u.pos['y']:3.2f}", f"Z: {u.pos['z']:3.2f}", f"Hdg: {u.pos['yaw']:3.2f}"], border_col, curses.color_pair(1))
+            
+            # Row 1 (Odom, Stats, Control)
+            self.draw_box(current_y+1, 2, box_h, box_w - 3, f"Odom [{u.odom_monitor.hz:.1f}Hz]", [f"Source: {u.est_diag.active_odometry_source if u.est_diag else ' '}", f"X: {u.pos['x']:3.2f}", f"Y: {u.pos['y']:3.2f}", f"Z: {u.pos['z']:3.2f}", f"Hdg: {u.pos['yaw']:3.2f}"], border_col, curses.color_pair(1) | curses.A_BOLD)
             
             midtxt = []
             if u.api_diag:
@@ -415,21 +425,37 @@ class LaserUavTUI(Node):
                 midtxt = ["Satellites: N/A", "RF Jamming: N/A"]
             if u.vins_feat:
                 midtxt += [f"OV Features: {u.vins_feat.data:.0f}"]
-            self.draw_box(current_y+1, 2 + box_w - 3, box_h, box_w - 2, "", midtxt, border_col, curses.color_pair(4))
+            self.draw_box(current_y+1, 2 + box_w - 3, box_h, box_w - 2, "", midtxt, border_col, curses.color_pair(4) | curses.A_BOLD)
             
             dtxt = []
             if u.api_diag: dtxt += [f"Armed: {'YES' if u.api_diag.armed else 'NO'} | Offb: {'YES' if u.api_diag.offboard_mode else 'NO'}"]
             if u.ctrl_diag: dtxt += [f"Fly: {'YES' if u.ctrl_diag.is_fly else 'NO'} | Goal: {'YES' if u.ctrl_diag.have_goal else 'NO'}", f"Speed: {u.ctrl_diag.current_norm_speed:.2f} m/s"]
             if u.ctrl_diag: dtxt += [f"Estimated Mass: {u.ctrl_diag.estimated_mass:.2f} Kg"]
             if u.ctrl_diag: dtxt += [f"RMSE: { f'{u.ctrl_diag.metrics.rmse:.2f}' if u.ctrl_diag.metrics.rmse >= 0 else ' '} | STD: { f'{u.ctrl_diag.metrics.std:.2f}' if u.ctrl_diag.metrics.std >= 0 else ' '}"]
-            if u.ctrl_diag: self.draw_box(current_y+1, (2 * box_w) - 1 - 2, box_h, max_x - (2 * box_w) - 4 + 3 + 2, f"Control [{u.ctrl_diag.control_iteration_duration_ms:.1f}ms]", dtxt, border_col, curses.color_pair(3))
+            if u.ctrl_diag: self.draw_box(current_y+1, (2 * box_w) - 1 - 2, box_h, max_x - (2 * box_w) - 4 + 3 + 2, f"Control [{u.ctrl_diag.control_iteration_duration_ms:.1f}ms]", dtxt, border_col, curses.color_pair(3) | curses.A_BOLD)
             
+            # Row 2 (Collision Diagnostics)
+            collision_detected = False
+            if u.ctrl_diag and hasattr(u.ctrl_diag, 'collision'):
+                collision_detected = u.ctrl_diag.collision
+
+            col_state_text = "DETECTED (DANGER)" if collision_detected else "CLEAR (SAFE)"
+            
+            if collision_detected and self.blink_state:
+                col_text_attr = curses.color_pair(6) | curses.A_BOLD
+            else:
+                col_text_attr = curses.color_pair(1) | curses.A_BOLD
+                
+            self.draw_box(current_y + box_h + 1, 2, col_box_h, max_x - 4, "Collision Diagnostics", [f"Collision Risk: {col_state_text}"], border_col, col_text_attr)
+            
+            # Row 3 (Topic Monitor Extras)
             if has_extras:
                 mon_content = []
                 for t_name, t_mon in u.extra_monitors.items():
                     display_name = t_name.replace(f"/{name}/", "").strip('/')
                     mon_content.append(f"{display_name:<35} {t_mon.hz:6.1f} Hz")
-                self.draw_box(current_y + box_h + 1, 2, len(u.extra_monitors.items()) + 2, max_x - 4, "Topic Monitor", mon_content, border_col, curses.color_pair(2))
+                self.draw_box(current_y + box_h + 1 + col_box_h, 2, len(u.extra_monitors.items()) + 2, max_x - 4, "Topic Monitor", mon_content, border_col, curses.color_pair(2) | curses.A_BOLD)
+                
             current_y += (block_height - 2) + 2
 
         try: self.stdscr.addstr(max_y-1, 1, " [UP/DOWN] Select UAV | [M] Menu | Ctrl+C Exit ", curses.color_pair(2) | curses.A_BOLD)
@@ -440,7 +466,7 @@ def main():
     
     def run(stdscr):
         curses.curs_set(0); curses.start_color(); curses.use_default_colors()
-        for i, c in enumerate([curses.COLOR_GREEN, curses.COLOR_WHITE, curses.COLOR_CYAN, curses.COLOR_MAGENTA, curses.COLOR_YELLOW], 1): 
+        for i, c in enumerate([curses.COLOR_GREEN, curses.COLOR_WHITE, curses.COLOR_CYAN, curses.COLOR_MAGENTA, curses.COLOR_YELLOW, curses.COLOR_RED], 1): 
             curses.init_pair(i, c, -1)
         node = LaserUavTUI(stdscr)
         try:
