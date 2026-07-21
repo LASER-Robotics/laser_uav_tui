@@ -1,3 +1,5 @@
+# DEPRECATED
+
 # Laser UAV TUI
 
 *The main TUI dashboard displaying real-time telemetry, hardware diagnostics, and topic monitoring for a single UAV in a ROS 2 environment.*
