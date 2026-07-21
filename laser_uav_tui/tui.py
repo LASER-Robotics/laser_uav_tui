@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
+import curses
+import math
 import os
+import re
 import sys
 import time
-import math
+
 import psutil
-import curses
-import re
-import yaml
 import rclpy
-from rclpy.node import Node
+import yaml
+from laser_msgs.msg import ApiPx4Diagnostics
+from laser_msgs.msg import EstimationManagerDiagnostics
+from laser_msgs.msg import PoseWithHeading
+from laser_msgs.msg import UavControlDiagnostics
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Float64
-from laser_msgs.msg import UavControlDiagnostics, EstimationManagerDiagnostics, ApiPx4Diagnostics, PoseWithHeading
-from std_srvs.srv import Trigger
+from rclpy.node import Node
 from rosidl_runtime_py.utilities import get_message
+from std_msgs.msg import Float64
+from std_srvs.srv import Trigger
 
 os.environ.setdefault('ESCDELAY', '25')
+
 
 def quaternion_to_euler(x, y, z, w):
     t0 = +2.0 * (w * x + y * z)
@@ -29,6 +34,7 @@ def quaternion_to_euler(x, y, z, w):
     t4 = +1.0 - 2.0 * (y * y + z * z)
     yaw = math.atan2(t3, t4)
     return roll, pitch, yaw
+
 
 class TopicMonitor:
     def __init__(self, node, topic_name, msg_type):
@@ -50,6 +56,7 @@ class TopicMonitor:
             self.last_time = now
         return self.hz
 
+
 class UavData:
     def __init__(self, node, name, config_topics):
         self.node = node
@@ -61,25 +68,30 @@ class UavData:
         self.vins_feat = None
         self.had_goal = False
         self.autostart_active = False
-        
+
         self.rampdown_initial = None
         self.rampdown_current = None
         self.visual_ratio = 1.0
 
         self.odom_monitor = TopicMonitor(node, f'/{name}/estimation_manager/estimation', Odometry)
-        node.create_subscription(Odometry, f'/{name}/estimation_manager/estimation', self.odom_cb, 10)
-        node.create_subscription(UavControlDiagnostics, f'/{name}/control_manager/diagnostics', self.ctrl_cb, 10)
-        node.create_subscription(EstimationManagerDiagnostics, f'/{name}/estimation_manager/diagnostics', self.est_cb, 10)
-        node.create_subscription(ApiPx4Diagnostics, f'/{name}/px4_api/diagnostics', self.api_cb, 10)
-        node.create_subscription(Float64, f'/{name}/ov_msckf/num_points_slam', self.vins_feat_cb, 10)
-        self.arm_cl = node.create_client(Trigger, f'/{name}/px4_api/arm')
-        self.disarm_cl = node.create_client(Trigger, f'/{name}/px4_api/disarm')
+        node.create_subscription(
+            Odometry, f'/{name}/estimation_manager/estimation', self.odom_cb, 10)
+        node.create_subscription(UavControlDiagnostics,
+                                 f'/{name}/control_manager/diagnostics', self.ctrl_cb, 10)
+        node.create_subscription(EstimationManagerDiagnostics,
+                                 f'/{name}/estimation_manager/diagnostics', self.est_cb, 10)
+        node.create_subscription(ApiPx4Diagnostics, f'/{name}/hw_api/diagnostics', self.api_cb, 10)
+        node.create_subscription(
+            Float64, f'/{name}/ov_msckf/num_points_slam', self.vins_feat_cb, 10)
+        self.arm_cl = node.create_client(Trigger, f'/{name}/hw_api/arm')
+        self.disarm_cl = node.create_client(Trigger, f'/{name}/hw_api/disarm')
         self.takeoff_cl = node.create_client(Trigger, f'/{name}/control_manager/takeoff')
         self.land_cl = node.create_client(Trigger, f'/{name}/control_manager/land')
         self.goto_pub = node.create_publisher(PoseWithHeading, f'/{name}/control_manager/goto', 10)
-        self.goto_relative_pub = node.create_publisher(PoseWithHeading, f'/{name}/control_manager/goto_relative', 10)
+        self.goto_relative_pub = node.create_publisher(
+            PoseWithHeading, f'/{name}/control_manager/goto_relative', 10)
         self.target_topics = config_topics
-        self.extra_monitors = {} 
+        self.extra_monitors = {}
 
     def check_and_subscribe_extras(self, available_topics_map):
         for topic in self.target_topics:
@@ -99,13 +111,14 @@ class UavData:
         p = msg.pose.pose.position
         o = msg.pose.pose.orientation
         self.pos['x'], self.pos['y'], self.pos['z'] = p.x, p.y, p.z
-        self.pos['roll'], self.pos['pitch'], self.pos['yaw'] = quaternion_to_euler(o.x, o.y, o.z, o.w)
+        self.pos['roll'], self.pos['pitch'], self.pos['yaw'] = quaternion_to_euler(
+            o.x, o.y, o.z, o.w)
 
-    def ctrl_cb(self, msg): 
+    def ctrl_cb(self, msg):
         self.ctrl_diag = msg
         if msg.have_goal:
             self.had_goal = True
-            
+
         if hasattr(msg, 'current_control_rampdown'):
             val = msg.current_control_rampdown
             if math.isnan(val):
@@ -116,14 +129,15 @@ class UavData:
                     self.rampdown_initial = val if val > 0 else 1.0
                 self.rampdown_current = val
 
-    def est_cb(self, msg): 
+    def est_cb(self, msg):
         self.est_diag = msg
 
-    def api_cb(self, msg): 
+    def api_cb(self, msg):
         self.api_diag = msg
 
-    def vins_feat_cb(self, msg): 
+    def vins_feat_cb(self, msg):
         self.vins_feat = msg
+
 
 class LaserUavTUI(Node):
     def __init__(self, stdscr):
@@ -142,7 +156,7 @@ class LaserUavTUI(Node):
         self.goto_vals = ["World", 0.0, 0.0, 1.5, 0.0]
         self.sys_info = {'cpu': 0.0, 'ram_percent': 0.0, 'ram_used': 0.0}
         self.blink_state = True
-        self.micro_agent_active = False 
+        self.micro_agent_active = False
         self.config_topics = []
         self.load_config_from_args()
 
@@ -178,7 +192,7 @@ class LaserUavTUI(Node):
                 if uav_name not in self.uavs:
                     if len(self.uavs) < 3:
                         self.uavs[uav_name] = UavData(self, uav_name, self.config_topics)
-        
+
         for uav in self.uavs.values():
             uav.check_and_subscribe_extras(topics_map)
 
@@ -218,11 +232,14 @@ class LaserUavTUI(Node):
             curses.update_lines_cols()
             return
         u_list = sorted(self.uavs.keys())
-        if not u_list: return
+        if not u_list:
+            return
 
         if self.in_goto_menu:
-            if key == curses.KEY_UP: self.goto_idx = (self.goto_idx - 1) % len(self.goto_options)
-            elif key == curses.KEY_DOWN: self.goto_idx = (self.goto_idx + 1) % len(self.goto_options)
+            if key == curses.KEY_UP:
+                self.goto_idx = (self.goto_idx - 1) % len(self.goto_options)
+            elif key == curses.KEY_DOWN:
+                self.goto_idx = (self.goto_idx + 1) % len(self.goto_options)
             elif key == 10:
                 if self.goto_idx == 0:
                     self.goto_vals[0] = "Relative" if self.goto_vals[0] == "World" else "World"
@@ -230,16 +247,24 @@ class LaserUavTUI(Node):
                     self.publish_goto(u_list[self.selected_idx])
                 else:
                     self.edit_goto_field()
-            elif key == 27: self.in_goto_menu = False
+            elif key == 27:
+                self.in_goto_menu = False
         elif self.in_menu:
-            if key == curses.KEY_UP: self.menu_idx = (self.menu_idx - 1) % len(self.menu_options)
-            elif key == curses.KEY_DOWN: self.menu_idx = (self.menu_idx + 1) % len(self.menu_options)
-            elif key == 10: self.execute_action(u_list[self.selected_idx])
-            elif key == 27: self.in_menu = False
+            if key == curses.KEY_UP:
+                self.menu_idx = (self.menu_idx - 1) % len(self.menu_options)
+            elif key == curses.KEY_DOWN:
+                self.menu_idx = (self.menu_idx + 1) % len(self.menu_options)
+            elif key == 10:
+                self.execute_action(u_list[self.selected_idx])
+            elif key == 27:
+                self.in_menu = False
         else:
-            if key == curses.KEY_UP: self.selected_idx = (self.selected_idx - 1) % len(u_list)
-            elif key == curses.KEY_DOWN: self.selected_idx = (self.selected_idx + 1) % len(u_list)
-            elif key in [ord('m'), ord('M')]: self.in_menu = True
+            if key == curses.KEY_UP:
+                self.selected_idx = (self.selected_idx - 1) % len(u_list)
+            elif key == curses.KEY_DOWN:
+                self.selected_idx = (self.selected_idx + 1) % len(u_list)
+            elif key in [ord('m'), ord('M')]:
+                self.in_menu = True
 
     def edit_goto_field(self):
         h, w = self.stdscr.getmaxyx()
@@ -255,24 +280,32 @@ class LaserUavTUI(Node):
         self.stdscr.attron(curses.color_pair(3) | curses.A_BOLD)
         new_val_str = ""
         while True:
-            self.draw_goto_menu(gy, gx) 
+            self.draw_goto_menu(gy, gx)
             self.stdscr.move(fy, fx)
             self.stdscr.addstr(" " * 17)
             self.stdscr.addstr(fy, fx + (17 - len(new_val_str))//2, new_val_str)
             self.stdscr.refresh()
             ch = self.stdscr.getch()
-            if ch == 10: break
-            elif ch == 27: 
-                curses.noecho(); curses.curs_set(0); return
+            if ch == 10:
+                break
+            elif ch == 27:
+                curses.noecho()
+                curses.curs_set(0)
+                return
             elif ch in (curses.KEY_BACKSPACE, 127, 8):
-                if len(new_val_str) > 0: new_val_str = new_val_str[:-1]
+                if len(new_val_str) > 0:
+                    new_val_str = new_val_str[:-1]
             elif 32 <= ch <= 126:
-                if len(new_val_str) < 10: new_val_str += chr(ch)
+                if len(new_val_str) < 10:
+                    new_val_str += chr(ch)
         try:
-            if new_val_str: self.goto_vals[self.goto_idx] = float(new_val_str)
-        except: pass
+            if new_val_str:
+                self.goto_vals[self.goto_idx] = float(new_val_str)
+        except:
+            pass
         self.stdscr.attroff(curses.color_pair(3) | curses.A_BOLD)
-        curses.noecho(); curses.curs_set(0)
+        curses.noecho()
+        curses.curs_set(0)
 
     def publish_goto(self, name):
         u = self.uavs[name]
@@ -281,25 +314,36 @@ class LaserUavTUI(Node):
         msg.position.y = float(self.goto_vals[2])
         msg.position.z = float(self.goto_vals[3])
         msg.heading = float(self.goto_vals[4])
-        
+
         if self.goto_vals[0] == "World":
             u.goto_pub.publish(msg)
         else:
             u.goto_relative_pub.publish(msg)
-            
+
         self.in_goto_menu = False
         self.in_menu = False
 
     def execute_action(self, name):
         u = self.uavs[name]
-        if self.menu_idx == 0: self.call_srv(u.arm_cl); self.in_menu = False
-        elif self.menu_idx == 1: self.call_srv(u.takeoff_cl); self.in_menu = False
-        elif self.menu_idx == 2: self.call_srv(u.land_cl); self.in_menu = False
-        elif self.menu_idx == 3: self.call_srv(u.disarm_cl); self.in_menu = False
-        elif self.menu_idx == 4: self.in_goto_menu = True; self.goto_idx = 0
+        if self.menu_idx == 0:
+            self.call_srv(u.arm_cl)
+            self.in_menu = False
+        elif self.menu_idx == 1:
+            self.call_srv(u.takeoff_cl)
+            self.in_menu = False
+        elif self.menu_idx == 2:
+            self.call_srv(u.land_cl)
+            self.in_menu = False
+        elif self.menu_idx == 3:
+            self.call_srv(u.disarm_cl)
+            self.in_menu = False
+        elif self.menu_idx == 4:
+            self.in_goto_menu = True
+            self.goto_idx = 0
 
     def call_srv(self, cl):
-        if cl.service_is_ready(): cl.call_async(Trigger.Request())
+        if cl.service_is_ready():
+            cl.call_async(Trigger.Request())
 
     def draw_watermark(self):
         h, w = self.stdscr.getmaxyx()
@@ -310,16 +354,20 @@ class LaserUavTUI(Node):
                " |_____/_/   \_\|____/|_____|_| \_\\"]
         self.stdscr.attron(curses.color_pair(2) | curses.A_DIM | curses.A_BOLD)
         for i, line in enumerate(art):
-            try: self.stdscr.addstr(h - 7 + i, w - len(line) - 2, line)
-            except: pass
+            try:
+                self.stdscr.addstr(h - 7 + i, w - len(line) - 2, line)
+            except:
+                pass
         self.stdscr.attroff(curses.color_pair(2) | curses.A_DIM | curses.A_BOLD)
 
     def draw_box(self, y, x, h, w, title, content, col_b, col_t, fill_ratio=None, fill_col=None):
         max_y, max_x = self.stdscr.getmaxyx()
-        if y + h > max_y or x + w > max_x: return
+        if y + h > max_y or x + w > max_x:
+            return
         try:
-            for i in range(h): self.stdscr.addstr(y + i, x, " " * w)
-            
+            for i in range(h):
+                self.stdscr.addstr(y + i, x, " " * w)
+
             for i in range(h):
                 current_col_b = col_b
                 if fill_ratio is not None and fill_col is not None:
@@ -330,46 +378,55 @@ class LaserUavTUI(Node):
                 self.stdscr.attron(current_col_b | curses.A_BOLD)
                 if i == 0:
                     self.stdscr.addstr(y, x, '╔' + '═'*(w-2) + '╗')
-                    if title: self.stdscr.addstr(y, x + (w - len(title) - 2)//2, f" {title} ")
+                    if title:
+                        self.stdscr.addstr(y, x + (w - len(title) - 2)//2, f" {title} ")
                 elif i == h - 1:
                     self.stdscr.addstr(y+h-1, x, '╚' + '═'*(w-2) + '╝')
                 else:
-                    self.stdscr.addstr(y+i, x, '║'); self.stdscr.addstr(y+i, x+w-1, '║')
+                    self.stdscr.addstr(y+i, x, '║')
+                    self.stdscr.addstr(y+i, x+w-1, '║')
                 self.stdscr.attroff(current_col_b | curses.A_BOLD)
-                
+
             self.stdscr.attron(col_t | curses.A_BOLD)
             for i, line in enumerate(content):
-                if i < h-2: self.stdscr.addstr(y+1+i, x+2, line[:w-4])
+                if i < h-2:
+                    self.stdscr.addstr(y+1+i, x+2, line[:w-4])
             self.stdscr.attroff(col_t | curses.A_BOLD)
-        except: pass
+        except:
+            pass
 
     def update_loop(self):
         k = self.stdscr.getch()
-        if k != -1: self.handle_input(k)
+        if k != -1:
+            self.handle_input(k)
         self.stdscr.erase()
         self.draw_watermark()
         self.draw_screen()
-        if self.in_menu: self.draw_menu()
+        if self.in_menu:
+            self.draw_menu()
         self.stdscr.refresh()
 
     def draw_menu(self):
         h, w = self.stdscr.getmaxyx()
         u_list = sorted(self.uavs.keys())
-        if not u_list: return
+        if not u_list:
+            return
         box_w_screen = (w - 4) // 3
         sys_center_x = 2 + box_w_screen + (box_w_screen // 2)
         menu_w = 18
         current_y_offset = 2
         for i in range(self.selected_idx):
-             u_loop = self.uavs[u_list[i]]
-             has_extra = len(u_loop.extra_monitors) > 0
-             current_y_offset += 10 + (8 if has_extra else 0)
+            u_loop = self.uavs[u_list[i]]
+            has_extra = len(u_loop.extra_monitors) > 0
+            current_y_offset += 10 + (8 if has_extra else 0)
 
         sy, sx = current_y_offset, max(2, sys_center_x - (menu_w // 2))
         u_name = u_list[self.selected_idx].upper()
-        self.draw_box(sy, sx, 9, menu_w, f"{u_name} MENU", [], curses.color_pair(3), curses.color_pair(2))
+        self.draw_box(sy, sx, 9, menu_w, f"{u_name} MENU", [],
+                      curses.color_pair(3), curses.color_pair(2))
         for i, opt in enumerate(self.menu_options):
-            attr = (curses.A_REVERSE | curses.A_BOLD) if i == self.menu_idx and not self.in_goto_menu else (curses.A_NORMAL | curses.A_BOLD)
+            attr = (curses.A_REVERSE | curses.A_BOLD) if i == self.menu_idx and not self.in_goto_menu else (
+                curses.A_NORMAL | curses.A_BOLD)
             self.stdscr.addstr(sy+2+i, sx+4, f" {opt} ", attr)
         if self.in_goto_menu:
             self.stdscr.attron(curses.color_pair(3) | curses.A_BOLD)
@@ -381,7 +438,8 @@ class LaserUavTUI(Node):
         box_w = 21
         self.draw_box(y, x, 8, box_w, "GOTO", [], curses.color_pair(3), curses.color_pair(2))
         for i, opt in enumerate(self.goto_options):
-            attr = (curses.A_REVERSE | curses.A_BOLD) if i == self.goto_idx else (curses.A_NORMAL | curses.A_BOLD)
+            attr = (curses.A_REVERSE | curses.A_BOLD) if i == self.goto_idx else (
+                curses.A_NORMAL | curses.A_BOLD)
             if i == 0:
                 content = f"{opt}: {self.goto_vals[i]}"
             elif i < 5:
@@ -393,20 +451,26 @@ class LaserUavTUI(Node):
     def draw_screen(self):
         max_y, max_x = self.stdscr.getmaxyx()
         header = f" LASER UAV SYSTEM | CPU: {self.sys_info['cpu']}% | RAM: {self.sys_info['ram_percent']}% "
-        try: self.stdscr.addstr(0, max(0, (max_x-len(header))//2), header, curses.color_pair(2) | curses.A_BOLD)
-        except: pass
+        try:
+            self.stdscr.addstr(0, max(0, (max_x-len(header))//2), header,
+                               curses.color_pair(2) | curses.A_BOLD)
+        except:
+            pass
         u_list = sorted(self.uavs.keys())
         box_h = 7
         current_y = 2
         for i, name in enumerate(u_list):
-            if current_y + box_h + 1 > max_y: break
+            if current_y + box_h + 1 > max_y:
+                break
             u = self.uavs[name]
             has_extras = len(u.extra_monitors) > 0
             block_height = 9 + ((len(u.extra_monitors.items()) + 2) if has_extras else 0)
-            if current_y + block_height > max_y: break
+            if current_y + block_height > max_y:
+                break
 
             checks_passed = getattr(u.api_diag, 'preflight_checks_passed', True)
-            frame_attr = curses.color_pair(1) | curses.A_BOLD if checks_passed else (curses.color_pair(5) | curses.A_BOLD if self.blink_state else curses.A_NORMAL)
+            frame_attr = curses.color_pair(1) | curses.A_BOLD if checks_passed else (
+                curses.color_pair(5) | curses.A_BOLD if self.blink_state else curses.A_NORMAL)
             self.stdscr.attron(frame_attr)
             try:
                 self.stdscr.addstr(current_y, 0, '┌' + '─'*(max_x-2) + '┐')
@@ -414,23 +478,27 @@ class LaserUavTUI(Node):
                 if agent_active:
                     self.stdscr.addstr(current_y, 2, " uXRCE: True ")
                 else:
-                    self.stdscr.addstr(current_y, 2, " uXRCE: False ", curses.color_pair(5) | curses.A_BOLD)
+                    self.stdscr.addstr(current_y, 2, " uXRCE: False ",
+                                       curses.color_pair(5) | curses.A_BOLD)
                 total_block_h = block_height - 1
                 for row in range(1, total_block_h):
-                    self.stdscr.addstr(current_y+row, 0, '│'); self.stdscr.addstr(current_y+row, max_x-1, '│')
+                    self.stdscr.addstr(current_y+row, 0, '│')
+                    self.stdscr.addstr(current_y+row, max_x-1, '│')
                 self.stdscr.addstr(current_y + total_block_h, 0, '└' + '─'*(max_x-2) + '┘')
                 self.stdscr.addstr(current_y, (max_x - len(name) - 2) // 2, f" {name.upper()} ")
                 if not u.had_goal:
                     as_status = 'True' if u.autostart_active else 'False'
                     as_txt = f" AutoStart: {as_status} "
                     self.stdscr.addstr(current_y, max_x - len(as_txt) - 4, as_txt)
-            except: pass
+            except:
+                pass
             self.stdscr.attroff(frame_attr)
-            
+
             border_col = curses.color_pair(3) if i == self.selected_idx else curses.color_pair(2)
             box_w = (max_x - 4) // 3
-            self.draw_box(current_y+1, 2, box_h, box_w - 3, f"Odom [{u.odom_monitor.hz:.1f}Hz]", [f"Source: {u.est_diag.active_odometry_source if u.est_diag else ' '}", f"X: {u.pos['x']:3.2f}", f"Y: {u.pos['y']:3.2f}", f"Z: {u.pos['z']:3.2f}", f"Hdg: {u.pos['yaw']:3.2f}"], border_col, curses.color_pair(1))
-            
+            self.draw_box(current_y+1, 2, box_h, box_w - 3, f"Odom [{u.odom_monitor.hz:.1f}Hz]", [f"Source: {u.est_diag.active_odometry_source if u.est_diag else ' '}",
+                          f"X: {u.pos['x']:3.2f}", f"Y: {u.pos['y']:3.2f}", f"Z: {u.pos['z']:3.2f}", f"Hdg: {u.pos['yaw']:3.2f}"], border_col, curses.color_pair(1))
+
             midtxt = []
             if u.api_diag:
                 qty_sat = getattr(u.api_diag, 'qty_satellites', 'N/A')
@@ -440,56 +508,69 @@ class LaserUavTUI(Node):
                 midtxt = ["Satellites: N/A", "RF Jamming: N/A"]
             if u.vins_feat:
                 midtxt += [f"OV Features: {u.vins_feat.data:.0f}"]
-            self.draw_box(current_y+1, 2 + box_w - 3, box_h, box_w - 2, "", midtxt, border_col, curses.color_pair(4))
-            
+            self.draw_box(current_y+1, 2 + box_w - 3, box_h, box_w - 2,
+                          "", midtxt, border_col, curses.color_pair(4))
+
             dtxt = []
-            if u.api_diag: dtxt += [f"Armed: {'YES' if u.api_diag.armed else 'NO'} | Offb: {'YES' if u.api_diag.offboard_mode else 'NO'}"]
-            if u.ctrl_diag: dtxt += [f"Fly: {'YES' if u.ctrl_diag.is_fly else 'NO'} | Goal: {'YES' if u.ctrl_diag.have_goal else 'NO'}", f"Speed: {u.ctrl_diag.current_norm_speed:.2f} m/s"]
-            if u.ctrl_diag: dtxt += [f"Estimated Mass: {u.ctrl_diag.estimated_mass:.2f} Kg"]
-            if u.ctrl_diag: dtxt += [f"RMSE: { f'{u.ctrl_diag.metrics.rmse:.2f}' if u.ctrl_diag.metrics.rmse >= 0 else ' '} | STD: { f'{u.ctrl_diag.metrics.std:.2f}' if u.ctrl_diag.metrics.std >= 0 else ' '}"]
-            
+            if u.api_diag:
+                dtxt += [f"Armed: {'YES' if u.api_diag.armed else 'NO'} | Offb: {'YES' if u.api_diag.offboard_mode else 'NO'}"]
+            if u.ctrl_diag:
+                dtxt += [f"Fly: {'YES' if u.ctrl_diag.is_fly else 'NO'} | Goal: {'YES' if u.ctrl_diag.have_goal else 'NO'}",
+                         f"Speed: {u.ctrl_diag.current_norm_speed:.2f} m/s"]
+            if u.ctrl_diag:
+                dtxt += [f"Estimated Mass: {u.ctrl_diag.estimated_mass:.2f} Kg"]
+            if u.ctrl_diag:
+                dtxt += [f"RMSE: { f'{u.ctrl_diag.metrics.rmse:.2f}' if u.ctrl_diag.metrics.rmse >= 0 else ' '} | STD: { f'{u.ctrl_diag.metrics.std:.2f}' if u.ctrl_diag.metrics.std >= 0 else ' '}"]
+
             if u.rampdown_current is not None:
                 dtxt += [f"Rampdown: {u.rampdown_current:.2f}"]
 
             fill_ratio = None
-            fill_col = curses.color_pair(6) | curses.A_BOLD 
+            fill_col = curses.color_pair(6) | curses.A_BOLD
             ctrl_border_col = border_col
 
             if u.rampdown_current is not None and u.rampdown_initial is not None:
                 ctrl_border_col = curses.color_pair(3)
                 target_ratio = max(0.0, min(1.0, u.rampdown_current / u.rampdown_initial))
-                
+
                 if u.visual_ratio > target_ratio:
                     u.visual_ratio = max(target_ratio, u.visual_ratio - 0.03)
                 else:
                     u.visual_ratio = target_ratio
-                    
+
                 fill_ratio = u.visual_ratio
             else:
-                u.visual_ratio = 1.0 
+                u.visual_ratio = 1.0
 
-            if u.ctrl_diag: 
-                self.draw_box(current_y+1, (2 * box_w) - 1 - 2, box_h, max_x - (2 * box_w) - 4 + 3 + 2, 
-                              f"Control [{u.ctrl_diag.control_iteration_duration_ms:.1f}ms]", 
+            if u.ctrl_diag:
+                self.draw_box(current_y+1, (2 * box_w) - 1 - 2, box_h, max_x - (2 * box_w) - 4 + 3 + 2,
+                              f"Control [{u.ctrl_diag.control_iteration_duration_ms:.1f}ms]",
                               dtxt, ctrl_border_col, curses.color_pair(3), fill_ratio=fill_ratio, fill_col=fill_col)
-            
+
             if has_extras:
                 mon_content = []
                 for t_name, t_mon in u.extra_monitors.items():
                     display_name = t_name.replace(f"/{name}/", "").strip('/')
                     mon_content.append(f"{display_name:<35} {t_mon.hz:6.1f} Hz")
-                self.draw_box(current_y + box_h + 1, 2, len(u.extra_monitors.items()) + 2, max_x - 4, "Topic Monitor", mon_content, border_col, curses.color_pair(2))
+                self.draw_box(current_y + box_h + 1, 2, len(u.extra_monitors.items()) + 2,
+                              max_x - 4, "Topic Monitor", mon_content, border_col, curses.color_pair(2))
             current_y += (block_height - 2) + 2
 
-        try: self.stdscr.addstr(max_y-1, 1, " [UP/DOWN] Select UAV | [M] Menu | Ctrl+C Exit ", curses.color_pair(2) | curses.A_BOLD)
-        except: pass
+        try:
+            self.stdscr.addstr(
+                max_y-1, 1, " [UP/DOWN] Select UAV | [M] Menu | Ctrl+C Exit ", curses.color_pair(2) | curses.A_BOLD)
+        except:
+            pass
+
 
 def main():
     rclpy.init(args=sys.argv)
-    
+
     def run(stdscr):
-        curses.curs_set(0); curses.start_color(); curses.use_default_colors()
-        for i, c in enumerate([curses.COLOR_GREEN, curses.COLOR_WHITE, curses.COLOR_CYAN, curses.COLOR_MAGENTA, curses.COLOR_YELLOW, curses.COLOR_RED], 1): 
+        curses.curs_set(0)
+        curses.start_color()
+        curses.use_default_colors()
+        for i, c in enumerate([curses.COLOR_GREEN, curses.COLOR_WHITE, curses.COLOR_CYAN, curses.COLOR_MAGENTA, curses.COLOR_YELLOW, curses.COLOR_RED], 1):
             curses.init_pair(i, c, -1)
         node = LaserUavTUI(stdscr)
         try:
@@ -499,13 +580,14 @@ def main():
         finally:
             node.destroy_node()
 
-    try: 
+    try:
         curses.wrapper(run)
-    except: 
+    except:
         pass
-    finally: 
+    finally:
         if rclpy.ok():
             rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
