@@ -1,62 +1,66 @@
-# DEPRECATED
+# LASER UAV TUI
 
-# Laser UAV TUI
+`laser_uav_tui` is the terminal dashboard for the LASER UAV System (LUS). It shows vehicle pose, velocity, topic rates and diagnostics, and lets an operator send flight commands without leaving the terminal.
 
-*The main TUI dashboard displaying real-time telemetry, hardware diagnostics, and topic monitoring for a single UAV in a ROS 2 environment.*
+The dashboard discovers up to three UAVs from topics matching `/<uavN>/estimation_manager/estimation`. It also shows host CPU and memory usage.
 
-**Laser UAV TUI** is a lightweight, `curses`-based Terminal User Interface (TUI) for monitoring and controlling multiple unmanned aerial vehicles (UAVs) in a ROS 2 environment. It provides real-time system and telemetry monitoring, diagnostic checks, and a command interface directly from your terminal.
+This package is marked as deprecated in the existing project documentation. The command and interfaces below match the implementation in this repository.
 
-![Image of the laser_uav_tui in operation.](https://github.com/LASER-Robotics/laser_uav_tui/blob/dev/increase_view/images/main_interface.png)
+![LUS terminal dashboard.](images/main_interface.png)
 
+## Run
 
-## Features
-
-* **Auto-Discovery:** Automatically detects and monitors up to 3 UAVs running on the network by scanning for specific `estimation` topics.
-* **Real-Time Telemetry:** Displays current Pose (X, Y, Z, Heading), publishing rates (Hz), and speeds.
-* **Hardware & API Diagnostics:** Monitors PX4 satellite counts, RF jamming status, and preflight check validations (UI blinks if checks fail).
-* **Control Interface:** Provides an interactive menu to send commands directly to the UAVs.
-* **Dynamic Topic Monitoring:** Monitor the frequency (Hz) of arbitrary ROS 2 topics by specifying them in a YAML configuration file.
-* **System Stats:** Tracks host CPU and RAM usage in real-time.
-
-
-## Usage
-
-Run the TUI node using the standard ROS 2 run command. To enable dynamic topic monitoring, pass the path to your `config.yaml` file as an argument.
+After building and sourcing the workspace:
 
 ```bash
-ros2 run laser_uav_tui tui.py --config $(ros2 pkg prefix laser_uav_tui)/share/laser_uav_tui/config/config.yaml
-
+ros2 run laser_uav_tui tui --config $(ros2 pkg prefix --share laser_uav_tui)/config/config.yaml
 ```
 
-**Keyboard Controls:**
+The executable is `tui`. `--config` is optional and selects extra topics to monitor. UAV telemetry and command interfaces use the paths below independently of that file.
 
-![laser_uav_tui system menu image ](https://github.com/LASER-Robotics/laser_uav_tui/blob/dev/increase_view/images/menu_interface.png)
+### Keyboard controls
 
-* **`UP` / `DOWN` Arrows**: Select a different UAV from the list.
-* **`M` or `m**`: Open the Action Menu for the selected UAV.
-* **`Enter`**: Execute the selected action or confirm a Go-To coordinate.
-* **`ESC`**: Exit the current menu or cancel coordinate input.
-* **`Ctrl + C`**: Gracefully exit the application.
+| Key | Action |
+| --- | --- |
+| Up / Down | Select a UAV or menu item. |
+| `M` / `m` | Open the action menu for the selected UAV. |
+| Enter | Select an action, edit a coordinate or send the goal. |
+| Escape | Close a menu or cancel coordinate entry. |
+| Ctrl+C | Exit. |
 
-**Interactive Control Menus:**
+The action menu provides Arm, Takeoff, Land, Disarm and GoTo. In GoTo, select World or Relative mode and enter position in metres and heading in radians. The managers and hardware API decide whether a command can be accepted in the current flight state.
 
-Pressing **`M`** opens the action menu for the selected UAV. From here, you can trigger specific service calls (Arm, Takeoff, Land, Disarm) or navigate to the "GoTo" submenu to send specific coordinates.
+![Flight-command menu.](images/menu_interface.png)
 
-![laser_uav_tui system goto menu image ](https://github.com/LASER-Robotics/laser_uav_tui/blob/dev/increase_view/images/goto_interface.png)
+![GoTo coordinate entry.](images/goto_interface.png)
 
-## Configuration (`config.yaml`):
+## Interfaces
 
-You can monitor the publishing rates of extra topics by adding them to the `config.yaml` file. The TUI will automatically resolve the message types and display their Hz in the "Topic Monitor" box shown in the main interface image.
+For a vehicle named `uav1`:
 
-Example `config/config.yaml`:
+| Direction | Topic or service | Type | Purpose |
+| --- | --- | --- | --- |
+| Input | `/uav1/estimation_manager/estimation` | `nav_msgs/msg/Odometry` | Pose, velocity and telemetry rate. |
+| Input | `/uav1/control_manager/diagnostics` | `laser_msgs/msg/UavControlDiagnostics` | Flight and control information. |
+| Input | `/uav1/estimation_manager/diagnostics` | `laser_msgs/msg/EstimationManagerDiagnostics` | Estimator and source status. |
+| Input | `/uav1/hw_api/diagnostics` | `laser_msgs/msg/ApiPx4Diagnostics` | Armed/offboard state, preflight status and GPS diagnostics. |
+| Input | `/uav1/ov_msckf/num_points_slam` | `std_msgs/msg/Float64` | OpenVINS feature count. |
+| Output | `/uav1/planning_manager/goto` | `laser_msgs/msg/PoseWithHeading` | Absolute navigation goal. |
+| Output | `/uav1/planning_manager/goto_relative` | `laser_msgs/msg/PoseWithHeading` | Relative navigation goal. |
+| Service client | `/uav1/hw_api/arm`, `/uav1/hw_api/disarm` | `std_srvs/srv/Trigger` | Arm/disarm requests. |
+| Service client | `/uav1/control_manager/takeoff`, `/uav1/control_manager/land` | `std_srvs/srv/Trigger` | Local takeoff/landing requests. |
+
+The TUI does not run the flight controllers or planners. Those nodes must already be available on the same ROS network.
+
+## Configuration
+
+The [config/config.yaml](config/config.yaml) file has one setting, `topics`, containing the absolute names of extra topics whose publication rates should be displayed:
 
 ```yaml
 topics:
   - "/uav1/camera/image_raw"
-  - "/uav2/lidar/scan"
-  - "/uav1/battery_status"
-
+  - "/uav1/lidar/scan"
+  - "/uav2/hw_api/odometry"
 ```
 
-*Note: The script dynamically maps these topics to the respective UAV based on the namespace (e.g., `uav1`, `uav2`).*
-
+The TUI resolves message types from the ROS graph and assigns each topic to a UAV by namespace. Update the supplied list for your setup; it still includes older `/px4_api/...` paths. Adding a topic here monitors its rate and does not change the telemetry subscriptions or command destinations.
