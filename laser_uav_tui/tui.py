@@ -87,9 +87,10 @@ class UavData:
         self.disarm_cl = node.create_client(Trigger, f'/{name}/hw_api/disarm')
         self.takeoff_cl = node.create_client(Trigger, f'/{name}/control_manager/takeoff')
         self.land_cl = node.create_client(Trigger, f'/{name}/control_manager/land')
-        self.goto_pub = node.create_publisher(PoseWithHeading, f'/{name}/control_manager/goto', 10)
+        self.goto_pub = node.create_publisher(
+            PoseWithHeading, f'/{name}/planning_manager/goto', 10)
         self.goto_relative_pub = node.create_publisher(
-            PoseWithHeading, f'/{name}/control_manager/goto_relative', 10)
+            PoseWithHeading, f'/{name}/planning_manager/goto_relative', 10)
         self.target_topics = config_topics
         self.extra_monitors = {}
 
