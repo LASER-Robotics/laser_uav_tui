@@ -45,6 +45,7 @@ For a vehicle named `uav1`:
 | Input | `/uav1/estimation_manager/diagnostics` | `laser_msgs/msg/EstimationManagerDiagnostics` | Estimator and source status. |
 | Input | `/uav1/hw_api/diagnostics` | `laser_msgs/msg/ApiPx4Diagnostics` | Armed/offboard state, preflight status and GPS diagnostics. |
 | Input | `/uav1/ov_msckf/num_points_slam` | `std_msgs/msg/Float64` | OpenVINS feature count. |
+| Input | `/uav1/fast_lio/num_points_effected` | `std_msgs/msg/Float64` | FAST-LIO effective point count. |
 | Output | `/uav1/planning_manager/goto` | `laser_msgs/msg/PoseWithHeading` | Absolute navigation goal. |
 | Output | `/uav1/planning_manager/goto_relative` | `laser_msgs/msg/PoseWithHeading` | Relative navigation goal. |
 | Service client | `/uav1/hw_api/arm`, `/uav1/hw_api/disarm` | `std_srvs/srv/Trigger` | Arm/disarm requests. |

@@ -66,6 +66,9 @@ class UavData:
         self.est_diag = None
         self.api_diag = None
         self.vins_feat = None
+        self.fast_lio_feat = None
+        self.fast_lio_last_time = 0.0
+        self.fast_lio_active = False
         self.had_goal = False
         self.autostart_active = False
 
@@ -83,6 +86,8 @@ class UavData:
         node.create_subscription(ApiPx4Diagnostics, f'/{name}/hw_api/diagnostics', self.api_cb, 10)
         node.create_subscription(
             Float64, f'/{name}/ov_msckf/num_points_slam', self.vins_feat_cb, 10)
+        node.create_subscription(
+            Float64, f'/{name}/fast_lio/num_points_effected', self.fast_lio_feat_cb, 10)
         self.arm_cl = node.create_client(Trigger, f'/{name}/hw_api/arm')
         self.disarm_cl = node.create_client(Trigger, f'/{name}/hw_api/disarm')
         self.takeoff_cl = node.create_client(Trigger, f'/{name}/control_manager/takeoff')
@@ -138,6 +143,10 @@ class UavData:
 
     def vins_feat_cb(self, msg):
         self.vins_feat = msg
+
+    def fast_lio_feat_cb(self, msg):
+        self.fast_lio_feat = msg
+        self.fast_lio_last_time = time.time()
 
 
 class LaserUavTUI(Node):
@@ -222,11 +231,17 @@ class LaserUavTUI(Node):
                 mon.update_hz()
             target_ns = f"/{name.lower().strip('/')}"
             found = False
+            fast_lio_found = False
             for node_name, node_ns in active_nodes:
-                if node_name == 'autostart' and node_ns == target_ns:
-                    found = True
-                    break
+                if node_ns == target_ns:
+                    if node_name == 'autostart':
+                        found = True
+                    elif node_name == 'laser_mapping':
+                        fast_lio_found = True
             uav.autostart_active = found
+            uav.fast_lio_active = fast_lio_found
+            if not fast_lio_found and (time.time() - uav.fast_lio_last_time >= 2.0):
+                uav.fast_lio_feat = None
 
     def handle_input(self, key):
         if key == curses.KEY_RESIZE:
@@ -509,6 +524,8 @@ class LaserUavTUI(Node):
                 midtxt = ["Satellites: N/A", "RF Jamming: N/A"]
             if u.vins_feat:
                 midtxt += [f"OV Features: {u.vins_feat.data:.0f}"]
+            if u.fast_lio_feat is not None and (u.fast_lio_active or (time.time() - u.fast_lio_last_time < 2.0)):
+                midtxt += [f"FL Points: {u.fast_lio_feat.data:.0f}"]
             self.draw_box(current_y+1, 2 + box_w - 3, box_h, box_w - 2,
                           "", midtxt, border_col, curses.color_pair(4))
 
